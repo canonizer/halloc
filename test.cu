@@ -36,10 +36,10 @@ void ha_shutdown(void);
 #define NCOUNTERS 2048
 
 /** testing parameters */
-#define NTHREADS (4 * 1024 * 1024)
+#define NTHREADS (8 * 1024 * 1024)
 #define NMALLOCS 1
 #define BS 512
-#define NTRIES 16
+#define NTRIES 32
 
 /** the buffer from which to allocate memory, [nblocks_g * block_sz_g] bytes */
 __device__ void *blocks_g;
@@ -142,7 +142,7 @@ void run_test1(void) {
 	}
 	double t2 = omp_get_wtime();
 	double nmallocs = (double)NMALLOCS * NTHREADS * NTRIES;
-	printf("test 1 (malloc/free inside each thread)\n:");
+	printf("test 1 (malloc/free inside each thread):\n");
 	printf("test duration %.3lf ms\n", (t2 - t1) * 1e3);
 	printf("%.0lf malloc/free pairs in the test\n", nmallocs);
 	printf("allocation speed: %.3lf Mpairs/s\n", nmallocs / (t2 - t1) * 1e-6);
@@ -167,10 +167,12 @@ void run_test2(void) {
 	// copy back and print some allocated pointers
 	void **h_ptrs = (void **)malloc(ptrs_sz);
 	cucheck(cudaMemcpy(h_ptrs, d_ptrs, ptrs_sz, cudaMemcpyDeviceToHost));
+	cucheck(cudaFree(d_ptrs));
 	for(int ip = 0; ip < 256; ip += 7)
 		printf("d_ptrs[%d] = %p\n", ip, h_ptrs[ip]);
+	free(h_ptrs);
 	double nmallocs = (double)NMALLOCS * NTHREADS * NTRIES;
-	printf("test 2 (first all mallocs, then all frees)\n:");
+	printf("test 2 (first all mallocs, then all frees):\n");
 	printf("test duration %.3lf ms\n", (t2 - t1) * 1e3);
 	printf("%.0lf malloc/free pairs in the test\n", nmallocs);
 	printf("allocation speed: %.3lf Mpairs/s\n", nmallocs / (t2 - t1) * 1e-6);
