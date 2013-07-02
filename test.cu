@@ -32,8 +32,9 @@ void ha_shutdown(void);
 #define BLOCK_SZ 16
 #define NBLOCKS (16 * 1024 * 1024)
 #define HASH_STEP (NBLOCKS / 128 + NBLOCKS / 32 - 1)
-//#define HASH_STEP (NBLOCKS / 512 + NBLOCKS / 128 - 1)
-#define NCOUNTERS 2048
+//#define HASH_STEP (NBLOCKS / (1024 * 1024) - 1)
+#define NCOUNTERS 1024
+//#define NCOUNTERS 2048
 
 /** testing parameters */
 #define NTHREADS (8 * 1024 * 1024)
@@ -92,9 +93,27 @@ __device__ void hafree(void *p) {
 	// ignore zero pointer
 	if(!p)
 		return;
+	// free the memory
 	uint iblock = ((char *)p - (char *)blocks_g) / block_sz_g;
 	uint iword = iblock / 32, ibit = iblock % 32;
 	atomicAnd(block_bits_g + iword, ~(1 << ibit));
+
+	// uint lid = threadIdx.x % 32;
+	// // warp-aggregated atomics
+	// bool want_free = true;
+	// while(__any(want_free)) {
+	// 	if(want_free) {
+	// 		uint leader_lid = __ffs(__ballot(want_free)) - 1;
+	// 		uint leader_iword = __shfl((int)iword, leader_lid);
+	// 		uint free_mask = leader_iword == iword ? 1 << ibit : 0;
+	// 		// reduce the mask across lanes
+	// 		for(uint i = 16; i >= 1; i /= 2)
+	// 			free_mask |= __shfl_xor((int)free_mask, i, 32);
+	// 		if(leader_lid == lid)
+	// 			atomicAnd(block_bits_g + iword, ~free_mask);
+	// 		want_free = want_free && leader_iword != iword;
+	// 	}  // if(want_free)
+	// }  // while(any wants to free)
 }  // hafree
 
 /** warp-based malloc implementation */
