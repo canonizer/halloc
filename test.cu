@@ -31,9 +31,9 @@ void ha_shutdown(void);
 /** allocator parameters */
 #define BLOCK_SZ 16
 #define NBLOCKS (16 * 1024 * 1024)
-#define HASH_STEP (NBLOCKS / 256 + NBLOCKS / 64 - 1)
-//#define HASH_STEP (NBLOCKS / (1024 * 1024) - 1)
-#define NCOUNTERS 1024
+//#define HASH_STEP (NBLOCKS / 256 + NBLOCKS / 64 - 1)
+#define HASH_STEP (NBLOCKS / (64) - 1)
+#define NCOUNTERS 2048
 #define COUNTER_INC 4
 //#define NCOUNTERS 2048
 
@@ -42,22 +42,22 @@ void ha_shutdown(void);
 #define NMALLOCS 16
 #define NTHREADS2 (NTHREADS / NMALLOCS)
 #define BS 512
-#define NTRIES 128
-//#define NTRIES 4
+//#define NTRIES 128
+#define NTRIES 1
 
 /** the buffer from which to allocate memory, [nblocks_g * block_sz_g] bytes */
 __device__ void *blocks_g;
 /** total number of blocks; always a power of two */
-__device__ uint nblocks_g = NBLOCKS;
+__constant__ uint nblocks_g = NBLOCKS;
 /** size of a single block in bytes (16 bytes by default) */
 __device__ uint block_sz_g = BLOCK_SZ;
 /** the step used for linear hash function */
-__device__ uint hash_step_g = HASH_STEP;
+__constant__ uint hash_step_g = HASH_STEP;
 /** bits indicating block occupancy (0 = free block, 1 = occupied block),
 		[nblocks_g / (sizeof(uint) * 8)] */
 __device__ uint *block_bits_g;
 /** total number of counters (a power of 2) */
-__device__ uint ncounters_g = NCOUNTERS;
+__constant__ uint ncounters_g = NCOUNTERS;
 /** the counters to generate allocation ids, initially set to 0 */
 __device__ uint *counters_g;
 
@@ -67,7 +67,7 @@ __device__ void *hamalloc(size_t nbytes) {
 	uint wid = tid / 32, lid = tid % 32;
 	uint leader_lid = __ffs(__ballot(1)) - 1;
 	//uint icounter = tid & (ncounters_g - 1);
-	uint icounter = wid & (ncounters_g - 1);
+	uint icounter = wid & (NCOUNTERS - 1);
 	//uint counter_val = atomicAdd(counters_g + icounter, 1);
 	uint counter_val;
 	if(lid == leader_lid)
@@ -80,19 +80,32 @@ __device__ void *hamalloc(size_t nbytes) {
 		& (nblocks_g - 1);
 	// iterate until successfully reserved
 	for(uint i = 0; i < nblocks_g; i++) {
+	//for(uint i = 0; i < 1; i++) {
 		// try reserve
 		uint iword = iblock / 32, ibit = iblock % 32;
-		uint old_word = atomicOr(block_bits_g + iword, 1 << ibit);
-		if(!((old_word >> ibit) & 1)) {
+		uint alloc_mask = 1 << ibit;
+		uint old_word = atomicOr(block_bits_g + iword, alloc_mask);
+		if(!(old_word & alloc_mask)) {
 			// reservation successful, return pointer
 			return (char *)blocks_g + iblock * block_sz_g;
 		} else 
 			iblock = (iblock + hash_step_g) & (nblocks_g - 1);
 	}
 	// if we are here, then all memory is used
-	printf("cannot allocate memory\n");
+	//printf("cannot allocate memory\n");
 	return 0;
 }  // hamalloc
+
+#define MAX_NWARPS 32
+
+__device__ uint warp_reduce_or(uint val, uint leader_lid) {
+	volatile __shared__ uint buf[MAX_NWARPS];
+	uint wid = threadIdx.x / 32, lid = threadIdx.x % 32;
+	if(lid == leader_lid)
+		buf[wid] = 0;
+	atomicOr((uint *)&buf[wid], val);
+	return val;
+}  // warp_reduce_or
 
 __device__ void hafree(void *p) {
 	// ignore zero pointer
@@ -112,8 +125,9 @@ __device__ void hafree(void *p) {
 	// 		uint leader_iword = __shfl((int)iword, leader_lid);
 	// 		uint free_mask = leader_iword == iword ? 1 << ibit : 0;
 	// 		// reduce the mask across lanes
-	// 		for(uint i = 16; i >= 1; i /= 2)
-	// 			free_mask |= __shfl_xor((int)free_mask, i, 32);
+	// 		//for(uint i = 16; i >= 1; i /= 2)
+	// 		//	free_mask |= __shfl_xor((int)free_mask, i, 32);
+	// 		free_mask = warp_reduce_or(free_mask, leader_lid);
 	// 		if(leader_lid == lid)
 	// 			atomicAnd(block_bits_g + iword, ~free_mask);
 	// 		want_free = want_free && leader_iword != iword;
