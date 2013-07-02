@@ -31,10 +31,11 @@ void ha_shutdown(void);
 /** allocator parameters */
 #define BLOCK_SZ 16
 #define NBLOCKS (16 * 1024 * 1024)
-//#define HASH_STEP (NBLOCKS / 256 + NBLOCKS / 64 - 1)
-#define HASH_STEP (NBLOCKS / (64) - 1)
+#define HASH_STEP (NBLOCKS / 256 + NBLOCKS / 64 - 1)
+//#define HASH_STEP (NBLOCKS / (64) - 1)
 #define NCOUNTERS 2048
-#define COUNTER_INC 4
+#define THREAD_FREQ 17
+#define COUNTER_INC 1
 //#define NCOUNTERS 2048
 
 /** testing parameters */
@@ -42,8 +43,8 @@ void ha_shutdown(void);
 #define NMALLOCS 16
 #define NTHREADS2 (NTHREADS / NMALLOCS)
 #define BS 512
-//#define NTRIES 128
-#define NTRIES 1
+#define NTRIES 128
+//#define NTRIES 1
 
 /** the buffer from which to allocate memory, [nblocks_g * block_sz_g] bytes */
 __device__ void *blocks_g;
@@ -76,7 +77,7 @@ __device__ void *hamalloc(size_t nbytes) {
 	// initial position
 	// TODO: use a real but cheap random number generator
 	//uint iblock = (tid + counter_val * hash_step_g) & (nblocks_g - 1);
-	uint iblock = (tid + counter_val * counter_val * (counter_val + 1)) 
+	uint iblock = (tid * THREAD_FREQ + counter_val * counter_val * (counter_val + 1)) 
 		& (nblocks_g - 1);
 	// iterate until successfully reserved
 	for(uint i = 0; i < nblocks_g; i++) {
@@ -264,7 +265,7 @@ void run_test2(void) {
 	for(int itry = 0; itry < NTRIES; itry++) {
 		malloc_k<<<NTHREADS2 / BS, BS>>>(d_ptrs);
 		cucheck(cudaGetLastError());
-		cucheck(cudaStreamSynchronize(0));
+		//cucheck(cudaStreamSynchronize(0));
 		free_k<<<NTHREADS2 / BS, BS>>>(d_ptrs);
 		cucheck(cudaGetLastError());
 		cucheck(cudaStreamSynchronize(0));
