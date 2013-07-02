@@ -31,16 +31,18 @@ void ha_shutdown(void);
 /** allocator parameters */
 #define BLOCK_SZ 16
 #define NBLOCKS (16 * 1024 * 1024)
-#define HASH_STEP (NBLOCKS / 128 + NBLOCKS / 32 - 1)
+#define HASH_STEP (NBLOCKS / 256 + NBLOCKS / 64 - 1)
 //#define HASH_STEP (NBLOCKS / (1024 * 1024) - 1)
 #define NCOUNTERS 1024
+#define COUNTER_INC 4
 //#define NCOUNTERS 2048
 
 /** testing parameters */
 #define NTHREADS (8 * 1024 * 1024)
-#define NMALLOCS 1
+#define NMALLOCS 16
+#define NTHREADS2 (NTHREADS / NMALLOCS)
 #define BS 512
-#define NTRIES 32
+#define NTRIES 128
 //#define NTRIES 4
 
 /** the buffer from which to allocate memory, [nblocks_g * block_sz_g] bytes */
@@ -69,10 +71,13 @@ __device__ void *hamalloc(size_t nbytes) {
 	//uint counter_val = atomicAdd(counters_g + icounter, 1);
 	uint counter_val;
 	if(lid == leader_lid)
-		counter_val = atomicAdd(counters_g + icounter, 1);
+		counter_val = atomicAdd(counters_g + icounter, COUNTER_INC);
 	counter_val = __shfl((int)counter_val, leader_lid);
 	// initial position
-	uint iblock = (tid + counter_val * hash_step_g) & (nblocks_g - 1);
+	// TODO: use a real but cheap random number generator
+	//uint iblock = (tid + counter_val * hash_step_g) & (nblocks_g - 1);
+	uint iblock = (tid + counter_val * counter_val * (counter_val + 1)) 
+		& (nblocks_g - 1);
 	// iterate until successfully reserved
 	for(uint i = 0; i < nblocks_g; i++) {
 		// try reserve
@@ -183,7 +188,7 @@ void ha_init(void) {
 	cucheck(cudaMalloc((void **)&counters, NCOUNTERS * sizeof(uint)));
 	// initialize to zero
 	cucheck(cudaMemset(block_bits, 0, NBLOCKS / 32 * sizeof(uint)));
-	cucheck(cudaMemset(counters, 0, NCOUNTERS * sizeof(uint)));
+	cucheck(cudaMemset(counters, 1, NCOUNTERS * sizeof(uint)));
 	// set device-side variables
 	void *block_bits_addr, *counters_addr, *blocks_addr;
 	cucheck(cudaGetSymbolAddress(&block_bits_addr, block_bits_g));
@@ -210,12 +215,14 @@ __global__ void malloc_free_k(int n) {
 // alloc--and-save-pointer kernel
 __global__ void malloc_k(void **ptrs) {
 	int tid = threadIdx.x + blockIdx.x * blockDim.x;
-	ptrs[tid] = hamalloc(16);
+	for(int iptr = tid; iptr < NMALLOCS * NTHREADS2; iptr += NTHREADS2)
+		ptrs[iptr] = hamalloc(16);
 }  // malloc_k
 // read-and-free pointer kernel
 __global__ void free_k(void **ptrs) {
 	int tid = threadIdx.x + blockIdx.x * blockDim.x;
-	hafree(ptrs[tid]);
+	for(int iptr = tid; iptr < NMALLOCS * NTHREADS2; iptr += NTHREADS2)
+		hafree(ptrs[iptr]);
 }  // free_k
 
 void run_test1(void) {
@@ -226,7 +233,7 @@ void run_test1(void) {
 		cucheck(cudaStreamSynchronize(0));
 	}
 	double t2 = omp_get_wtime();
-	double nmallocs = (double)NMALLOCS * NTHREADS * NTRIES;
+	double nmallocs = (double)NTHREADS * NTRIES;
 	printf("test 1 (malloc/free inside each thread):\n");
 	printf("test duration %.3lf ms\n", (t2 - t1) * 1e3);
 	printf("%.0lf malloc/free pairs in the test\n", nmallocs);
@@ -236,15 +243,15 @@ void run_test1(void) {
 
 void run_test2(void) {
 	void **d_ptrs;
-	size_t ptrs_sz = NTHREADS * NMALLOCS * sizeof(void *);
+	size_t ptrs_sz = NTHREADS2 * NMALLOCS * sizeof(void *);
 	cucheck(cudaMalloc(&d_ptrs, ptrs_sz));
 	cucheck(cudaMemset(d_ptrs, 0, ptrs_sz));
 	double t1 = omp_get_wtime();
 	for(int itry = 0; itry < NTRIES; itry++) {
-		malloc_k<<<NTHREADS / BS, BS>>>(d_ptrs);
+		malloc_k<<<NTHREADS2 / BS, BS>>>(d_ptrs);
 		cucheck(cudaGetLastError());
 		cucheck(cudaStreamSynchronize(0));
-		free_k<<<NTHREADS / BS, BS>>>(d_ptrs);
+		free_k<<<NTHREADS2 / BS, BS>>>(d_ptrs);
 		cucheck(cudaGetLastError());
 		cucheck(cudaStreamSynchronize(0));
 	}
@@ -256,7 +263,7 @@ void run_test2(void) {
 	for(int ip = 0; ip < 256; ip += 7)
 		printf("d_ptrs[%d] = %p\n", ip, h_ptrs[ip]);
 	free(h_ptrs);
-	double nmallocs = (double)NMALLOCS * NTHREADS * NTRIES;
+	double nmallocs = (double)NMALLOCS * NTHREADS2 * NTRIES;
 	printf("test 2 (first all mallocs, then all frees):\n");
 	printf("test duration %.3lf ms\n", (t2 - t1) * 1e3);
 	printf("%.0lf malloc/free pairs in the test\n", nmallocs);
