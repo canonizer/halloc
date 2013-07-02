@@ -16,7 +16,6 @@
 	}																																			\
 	}
 
-
 /** memory allocation; @nbytes is ignored */
 __device__ void *hamalloc(size_t nbytes);
 
@@ -33,6 +32,7 @@ void ha_shutdown(void);
 #define BLOCK_SZ 16
 #define NBLOCKS (16 * 1024 * 1024)
 #define HASH_STEP (NBLOCKS / 128 + NBLOCKS / 32 - 1)
+//#define HASH_STEP (NBLOCKS / 512 + NBLOCKS / 128 - 1)
 #define NCOUNTERS 2048
 
 /** testing parameters */
@@ -40,6 +40,7 @@ void ha_shutdown(void);
 #define NMALLOCS 1
 #define BS 512
 #define NTRIES 32
+//#define NTRIES 4
 
 /** the buffer from which to allocate memory, [nblocks_g * block_sz_g] bytes */
 __device__ void *blocks_g;
@@ -60,8 +61,15 @@ __device__ uint *counters_g;
 __device__ void *hamalloc(size_t nbytes) {
 	// the counter is based on block id
 	uint tid = threadIdx.x + blockIdx.x * blockDim.x;
-	uint icounter = tid & (ncounters_g - 1);
-	uint counter_val = atomicAdd(counters_g + icounter, 1);
+	uint wid = tid / 32, lid = tid % 32;
+	uint leader_lid = __ffs(__ballot(1)) - 1;
+	//uint icounter = tid & (ncounters_g - 1);
+	uint icounter = wid & (ncounters_g - 1);
+	//uint counter_val = atomicAdd(counters_g + icounter, 1);
+	uint counter_val;
+	if(lid == leader_lid)
+		counter_val = atomicAdd(counters_g + icounter, 1);
+	counter_val = __shfl((int)counter_val, leader_lid);
 	// initial position
 	uint iblock = (tid + counter_val * hash_step_g) & (nblocks_g - 1);
 	// iterate until successfully reserved
@@ -88,6 +96,64 @@ __device__ void hafree(void *p) {
 	uint iword = iblock / 32, ibit = iblock % 32;
 	atomicAnd(block_bits_g + iword, ~(1 << ibit));
 }  // hafree
+
+/** warp-based malloc implementation */
+__device__ void *hamalloc2(size_t nbytes) {
+	// TODO: find out where it fails
+	// the counter is based on block id
+	uint tid = threadIdx.x + blockIdx.x * blockDim.x, wid = tid / 32;
+	uint lid = tid % 32;
+	uint icounter = wid & (ncounters_g - 1);
+	uint want_alloc_mask = __ballot(1);
+	uint want_alloc = 1;
+	uint leader_lid = __ffs(want_alloc_mask) - 1;
+	uint counter_val;
+	if(lid == leader_lid)
+		counter_val = atomicAdd(counters_g + icounter, 1);
+	counter_val = __shfl((int)counter_val, leader_lid);
+	int nwords = nblocks_g / 32;
+	// initial position
+	uint iword = (wid + counter_val * hash_step_g) & (nwords - 1);
+	// the allocated pointer
+	void *ptr = 0;
+	// iterate until successfully reserved
+	for(uint i = 0; i < nwords; i++) {
+		// try reserve
+		if(want_alloc) {
+			uint nwant_alloc = __popc(want_alloc_mask);
+			// lane number, but only among active lanes. Note that it's inverted, so
+			// that the leader lane gets the last portion
+			uint leader_lid = __ffs(want_alloc_mask) - 1;
+			uint lid_in_active = 	__popc(want_alloc_mask & ((1 << lid) - 1));
+			uint reserved_mask;
+			if(lid == leader_lid)
+				reserved_mask = ~atomicOr(block_bits_g + iword, ~0);
+			reserved_mask = __shfl((int)reserved_mask, leader_lid);
+			uint nreserved = __popc(reserved_mask);
+			// TODO: invent a better way to map threads wanting allocate to
+			// reservation mask
+			for(int iwant_alloc = 0; iwant_alloc < min(nwant_alloc, nreserved); 
+					iwant_alloc++) {
+				uint reserved_bit = __ffs(reserved_mask) - 1;
+				reserved_mask &= ~(1 << reserved_bit);
+				if(iwant_alloc == lid_in_active) {
+					ptr = (char *)blocks_g + iword * 32 + reserved_bit;
+					want_alloc = 0;
+				}
+			}
+			if(reserved_mask && lid == leader_lid)
+				atomicAnd(block_bits_g + iword, ~reserved_mask);
+		}
+		// else go to the next word
+		want_alloc_mask = __ballot(want_alloc);
+		if(!want_alloc_mask)
+			break;
+		iword = (iword + hash_step_g) & (nwords - 1);
+	}  // for(i in nwords)
+	if(!ptr)
+		printf("cannot allocate memory\n");
+	return ptr;
+}  // hamalloc2
 
 void ha_init(void) {
 	// allocate memory

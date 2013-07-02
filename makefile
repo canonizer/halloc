@@ -6,7 +6,7 @@ TGT=$(NAME)
 TMP=*~ \\\#* $(TGT)
 
 build: $(TGT)
-$(TGT):	$(SRC)
+$(TGT):	$(SRC) makefile
 	nvcc -arch=sm_35 -O3 -Xcompiler -fopenmp $(SRC_C) -o $(TGT)
 
 run: $(TGT)
