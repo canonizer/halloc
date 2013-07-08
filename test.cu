@@ -19,12 +19,12 @@
 #include "halloc.h"
 
 /** testing parameters */
-#define NTHREADS (NBLOCKS / 4)
+#define NTHREADS (16384)
 //#define NTHREADS 16384
 #define NMALLOCS 16
 #define NTHREADS2 (NTHREADS / NMALLOCS)
 #define BS 512
-#define NTRIES 64
+#define NTRIES 1
 //#define NTRIES 1
 
 // alloc/free kernel

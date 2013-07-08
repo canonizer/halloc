@@ -1,6 +1,7 @@
 /** @file hamalloc.cu implementation of halloc allocator */
 
 #include <algorithm>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,6 +18,32 @@
 		exit(-1);																														\
 	}																																			\
 	}
+
+/** sets CUDA device variable */
+#define cuset(symbol, T, val)																		\
+{																																\
+	void *cuset_addr;																							\
+	cucheck(cudaGetSymbolAddress(&cuset_addr, symbol));						\
+	T cuset_val = (val);																					\
+	cucheck(cudaMemcpy(cuset_addr, &cuset_val, sizeof(cuset_val), \
+										 cudaMemcpyHostToDevice));									\
+}  // cuset
+
+#define cuset_arr(symbol, val)												\
+{																											\
+	void *cuset_addr;																		\
+	cucheck(cudaGetSymbolAddress(&cuset_addr, symbol));	\
+	cucheck(cudaMemcpy(cuset_addr, *val, sizeof(*val),	\
+										 cudaMemcpyHostToDevice));				\
+} // cuset_arr
+
+/** acts as cudaMemset(), but accepts device variable */
+#define cuvar_memset(symbol, val, sz)									\
+{																											\
+	void *cuvar_addr;																		\
+	cucheck(cudaGetSymbolAddress(&cuvar_addr, symbol));	\
+	cucheck(cudaMemset(cuvar_addr, val, sz));						\
+}  // cuvar_memset
 
 /** 64-bit integer type */
 typedef unsigned long long uint64;
@@ -56,6 +83,8 @@ typedef unsigned long long uint64;
 #define MAX_NTRIES 64
 /** a "no-sb" constant */
 #define SB_NONE (~0)
+/** a "no-size" constant */
+#define SZ_NONE (~0)
 /** block step (16 bytes by default), a power of two */
 #define BLOCK_STEP 16
 /** minimum block size (a power of two) */
@@ -73,7 +102,7 @@ typedef struct {
 /** block size */
 uint block_sz;
 /** number of blocks in superblock */
-uint nblocks_in_sb;
+uint nblocks;
 /** step for the hash function */
 uint hash_step;
 /** threshold for the superblock to be declared "roomy" */
@@ -88,8 +117,8 @@ uint busy_threshold;
 typedef struct {
 	/** counter of occupied blocks */
 	uint noccupied;
-	/** superblock id, just in case */
-	uint id;
+	/** superblock size id */
+	uint size_id;
 	/** pointer to memory owned by superblock */
 	void *ptr;
 } superblock_t;
@@ -138,13 +167,13 @@ __device__ uint64 sb_grid_g[2 * MAX_NSBS];
 /** gets superblock from set (and removes it) */
 __device__ inline uint sbset_get_from(sbset_t *sbset, uint except) {
 	// TODO: maybe do several trials to be sure
-	for(uint iword = 0; iword < nsbs / WORD_SZ; iword++)
-		for(uint iword = sbset[iword], ibit = __ffs(iword) - 1; iword; 
-				iword &= ~(1 <<	ibit), ibit = __ffs(iword) - 1) {
+	for(uint iword = 0; iword < nsbs_g / WORD_SZ; iword++)
+		for(uint word = (*sbset)[iword], ibit = __ffs(word) - 1; word;
+				word &= ~(1 <<	ibit), ibit = __ffs(word) - 1) {
 			// try locking the bit
 			if(iword * WORD_SZ + ibit != except) {
 				uint mask = 1 << ibit;
-				if(atomicAnd(&sbset[iword], ~mask) & mask)
+				if(atomicAnd(&(*sbset)[iword], ~mask) & mask)
 					return iword * WORD_SZ + ibit;
 			}
 		}
@@ -152,9 +181,9 @@ __device__ inline uint sbset_get_from(sbset_t *sbset, uint except) {
 }  // sbset_get_from
 
 /** adds ("returns") superblock to the set */
-__device__ inline uint sbset_add_to(sbset_t *sbset, uint sb) {
+__device__ inline void sbset_add_to(sbset_t *sbset, uint sb) {
 	uint iword = sb / WORD_SZ, ibit = sb % WORD_SZ;
-	atomicOr(&sbset[iword], 1 << ibit);
+	atomicOr(&(*sbset)[iword], 1 << ibit);
 }  // sbset_add_to
 
 // constants related to grid cells
@@ -167,32 +196,79 @@ __device__ inline uint sbset_add_to(sbset_t *sbset, uint sb) {
 #define GRID_FIRST_SB_POS 13
 #define GRID_SECOND_SB_POS 26
 #define GRID_ADDR_POS 39
-#define GRID_ADDR_UNIT_SH 4
+#define GRID_ADDR_SH 4
+/** initial value for the grid cell */
+__host__ __device__ inline uint64 grid_cell_init() {
+	uint64 no_sb_field = (1 << GRID_SB_LEN) - 1;
+	return no_sb_field << GRID_FIRST_SB_POS | no_sb_field << GRID_SECOND_SB_POS;
+}
+/** add the superblock to the grid 
+		// TODO: use on device as well, also with size id
+*/
+__host__ inline void grid_add_sb
+(uint64 *cells, void *base_addr, uint sb, void *sb_addr, uint sb_sz) {
+	void *sb_end_addr = (char *)sb_addr + sb_sz - 1;
+	uint icell_start = ((char *)sb_addr - (char *)base_addr) / sb_sz;
+	uint icell_end = ((char *)sb_addr + sb_sz - 1 - (char *)base_addr) / sb_sz;
+	for(uint icell = icell_start; icell <= icell_end; icell++) {
+		uint64 cell = cells[icell];
+		cell |= 1ull << GRID_INIT_POS;
+		void *cell_start_addr = (char *)base_addr + icell * sb_sz;
+		void *cell_end_addr = (char *)base_addr + (icell + 1) * sb_sz - 1;
+		if(sb_addr <= cell_start_addr) {
+			// set first superblock in cell
+			uint64 first_sb_mask = ((1ull << GRID_SB_LEN) - 1) << GRID_FIRST_SB_POS;
+			cell = ~first_sb_mask & cell | (uint64)sb << GRID_FIRST_SB_POS;
+		}
+		if(sb_end_addr >= cell_end_addr) {
+			// set second superblock in cell
+			uint64 second_sb_mask = ((1ull << GRID_SB_LEN) - 1) << GRID_SECOND_SB_POS;
+			cell = ~second_sb_mask & cell | (uint64)sb << GRID_SECOND_SB_POS;
+		}
+		uint64 mid_addr_mask = ((1ull << GRID_ADDR_LEN) - 1) << GRID_ADDR_POS;
+		// set the break address
+		if(sb_addr >= cell_start_addr) {
+			// current superblock is the second superblock, mid address is its start
+			uint64 mid_addr = ((char *)sb_addr - (char *)cell_start_addr) >> 
+				GRID_ADDR_SH;
+			cell = ~mid_addr_mask & cell | mid_addr << GRID_ADDR_POS;
+		} else if(sb_end_addr <= cell_end_addr) {
+			// current superblock is the first superblock, mid address is end of this
+			// superblock + 1
+			uint64 mid_addr = ((char *)sb_end_addr + 1 - (char *)cell_start_addr) >>
+				GRID_ADDR_SH;
+			cell = ~mid_addr_mask & cell | mid_addr << GRID_ADDR_POS;
+		}
+		// save the modified cell
+		cells[icell] = cell;
+	}  // for(each cell in interval)
+}  // grid_add_sb
+
 /** checks whether the grid cell is initialized */
 __device__ inline bool grid_is_init(uint64 cell) {
 	return (cell >> GRID_INIT_POS) & 1;
 } 
 /** gets the first size id of the grid cell */
 __device__ inline uint grid_first_size_id(uint64 cell) {
-	return (cell >> GRID_FIRST_SIZE_POS) & ((1 << GRID_SIZE_LEN) - 1);
+	return (cell >> GRID_FIRST_SIZE_POS) & ((1ull << GRID_SIZE_LEN) - 1);
 }
 /** gets the  second size id of the grid cell */
 __device__ inline uint grid_second_size_id(uint64 cell) {
-	return (cell >> GRID_SECOND_SIZE_POS) & ((1 << GRID_SIZE_LEN) - 1);
+	return (cell >> GRID_SECOND_SIZE_POS) & ((1ull << GRID_SIZE_LEN) - 1);
 }
 /** gets the first superblock id of the grid cell  */
 __device__ inline uint grid_first_sb_id(uint64 cell) {
-	return (cell >> GRID_FIRST_SB_POS) & ((1 << GRID_SB_LEN) - 1);
+	return (cell >> GRID_FIRST_SB_POS) & ((1ull << GRID_SB_LEN) - 1);
 }
 /** gets the second superblock id of the grid cell  */
 __device__ inline uint grid_second_sb_id(uint64 cell) {
-	return (cell >> GRID_SECOND_SB_POS) & ((1 << GRID_SB_LEN) - 1);
+	return (cell >> GRID_SECOND_SB_POS) & ((1ull << GRID_SB_LEN) - 1);
 }
 /** gets the mid-address of the grid cell */
 __device__ inline void *grid_mid_addr(uint icell, uint64 cell) {
-	uint in_sb_addr = ((cell >> GRID_ADDR_POS) & ((1 << GRID_ADDR_LEN) - 1)) 
-		<< GRID_ADDR_UNIT_SH;
-	return (char *)base_addr_g + icell * sb_sz_g;
+	uint in_sb_addr = ((cell >> GRID_ADDR_POS) & ((1ull << GRID_ADDR_LEN) - 1)) 
+		<< GRID_ADDR_SH;
+	return (char *)base_addr_g + icell * sb_sz_g + in_sb_addr;
 }
 /** gets the grid cell for the pointer */
 __device__ inline uint64 grid_cell(void *p, uint *icell) {
@@ -214,7 +290,7 @@ __device__ inline uint grid_sb_id(uint icell, uint64 cell, void *p) {
 
 /** gets block bits for superblock */
 __device__ inline uint *sb_block_bits(uint sb) {
-	return bit_blocks_g + sb * nsb_bit_words_g;
+	return block_bits_g + sb * nsb_bit_words_g;
 }  // sb_block_bits
 
 /** increment distributed superblock counter 
@@ -223,7 +299,8 @@ __device__ inline uint *sb_block_bits(uint sb) {
 		@param old_word the old value of the word where allocation took place
 		@param iword the index of the word where allocation took place
 */
-void sb_dctr_inc(uint size_id, uint sb, uint old_word, uint iword) {
+__device__ inline void sb_dctr_inc
+(uint size_id, uint sb, uint old_word, uint iword) {
 	uint nword_blocks = __popc(old_word);
 	if(nword_blocks % SB_DISTR_STEP == 0) {
 		// increment distributed counter
@@ -242,16 +319,17 @@ void sb_dctr_inc(uint size_id, uint sb, uint old_word, uint iword) {
 		@param new_word the new value of the word where the allocation took place
 		@param iword the index of the word where the allocation took place
  */
-void inline sb_dctr_dec(uint size_id, uint sb, uint new_word, uint iword) {
+__device__ inline void sb_dctr_dec
+(uint size_id, uint sb, uint new_word, uint iword) {
 	uint nword_blocks = __popc(new_word);
 	if(nword_blocks % SB_DISTR_STEP == 0) {
 		// decrement distributed counter
 		uint ictr = iword % NSB_COUNTERS;
-		uint new_val = atomicAdd(&sb_counters_g[sb][ictr], -SB_DISTR_STEP) - 
+		uint new_val = atomicSub(&sb_counters_g[sb][ictr], SB_DISTR_STEP) - 
 			SB_DISTR_STEP;
 		if(new_val % SB_MAIN_STEP == 0) {
 			// decrement main counter
-			new_main_val = atomicAdd(&sbs_g[sb].noccupied, -SB_MAIN_STEP) - 
+			uint new_main_val = atomicSub(&sbs_g[sb].noccupied, SB_MAIN_STEP) - 
 				SB_MAIN_STEP;
 			if(new_main_val <= size_infos_g[size_id].roomy_threshold) {
 				// mark superblock as roomy for current size
@@ -287,15 +365,15 @@ __device__ inline void *sb_alloc_in(uint sb, uint *iblock, uint size_id) {
 		old_word = atomicOr(block_bits + iword, alloc_mask);
 		if(!(old_word & alloc_mask)) {
 			// reservation successful, return pointer
-			ptr = (char *)sbs_g[sb].ptr + *iblock * size_infos_g[size_id].block_sz;
+			p = (char *)sbs_g[sb].ptr + *iblock * size_infos_g[size_id].block_sz;
 			break;
 		} else 
 			*iblock = (*iblock + size_infos_g[size_id].hash_step) 
-				& (size_infos_g[size_id].nblocks - 1);
+				% size_infos_g[size_id].nblocks;
 	}
-	if(ptr)
+	if(p)
 		sb_dctr_inc(size_id, sb, old_word, iword);
-	return ptr;	
+	return p;	
 }  // sb_alloc_in
 
 /** tries to find a new superblock for the given size
@@ -308,9 +386,9 @@ __device__ inline uint new_sb_for_size(uint size_id) {
 		// locked successfully, check if really need replacing blocks
 		uint cur_head = *(volatile uint *)&head_sbs_g[size_id];
 		uint new_head;
-		if(sb_id == SB_NONE || 
-			 *(volatile uint *)&sbs_g[cur_head].noccupied >=
-			 size_infos_g[size_id].busy_threshold) {
+		if(cur_head == SB_NONE || 
+			*(volatile uint *)&sbs_g[cur_head].noccupied >=
+			size_infos_g[size_id].busy_threshold) {
 			// replacement really necessary; first try among roomy sb's of current 
 			// size
 			uint new_head = sbset_get_from(&roomy_sbs_g[size_id], cur_head);
@@ -321,6 +399,7 @@ __device__ inline uint new_sb_for_size(uint size_id) {
 			if(new_head != SB_NONE) {
 				// replace current head
 				head_sbs_g[size_id] = new_head;
+				*(volatile uint *)&sbs_g[new_head].size_id = size_id;
 			}
 		} else {
 			// just re-read the new head superblock
@@ -333,7 +412,7 @@ __device__ inline uint new_sb_for_size(uint size_id) {
 	} else {
 		// someone else working on current head superblock; 
 		while(*(volatile uint *)&head_locks_g[size_id]);
-		return *(volatile uint)&head_sbs_g[size_id];
+		return *(volatile uint *)&head_sbs_g[size_id];
 	}
 }  // new_sb_for_size
 
@@ -350,12 +429,12 @@ __device__ void *hamalloc(size_t nbytes) {
 	uint cv;
 	if(lid == leader_lid)
 		cv = atomicAdd(counters_g + icounter, COUNTER_INC);
-	cv = __shfl((int)counter_val, leader_lid);
+	cv = __shfl((int)cv, leader_lid);
 	void *p = 0;
 	// initial position
 	// TODO: use a real but cheap random number generator
-	uint iblock = (tid * THREAD_FREQ + cv * cv * (cv + 1)) & 
-		(size_infos_g[size_id].nblocks - 1);
+	uint iblock = (tid * THREAD_FREQ + cv * cv * (cv + 1)) %
+		size_infos_g[size_id].nblocks;
 	// main allocation loop
 	bool want_alloc = true;
 	// use two-level loop to avoid warplocks
@@ -395,8 +474,9 @@ __device__ void hafree(void *p) {
 	// get the cell descriptor and other data
 	uint icell;
 	uint64 cell = grid_cell(p, &icell);
-	uint size_id = grid_size_id(icell, cell, p);
+	//uint size_id = grid_size_id(icell, cell, p);
 	uint sb_id = grid_sb_id(icell, cell, p);
+	uint size_id = sbs_g[sb_id].size_id;
 	uint *bits = sb_block_bits(sb_id);
 	// free the memory
 	uint iblock = ((char *)p - (char *)sbs_g[sb_id].ptr) / 
@@ -407,6 +487,25 @@ __device__ void hafree(void *p) {
 	sb_dctr_dec(size_id, sb_id, new_word, iword);
 }  // hafree
 
+/** find the largest prime number below this one, and not dividing this one */
+uint max_prime_below(uint n) {
+	for(uint p = n - 1; p >= 3; p--) {
+		uint max_d = (uint)floor(sqrt(p));
+		bool is_prime = true;
+		for(uint d = 2; d <= max_d; d++)
+			if(p % d == 0) {
+				is_prime = false;
+				break;
+			}
+		if(is_prime && n % p)
+			return p;
+	}
+	// if we are here, we can't find prime; exit with failure
+	fprintf(stderr, "cannot find prime below %d not dividing %d\n", n, n);
+	exit(-1);
+	return ~0;
+}  // max_prime_below
+
 void ha_init(void) {
 	// TODO: initialize all devices
 	// get total device memory (in bytes) & total number of superblocks
@@ -416,42 +515,78 @@ void ha_init(void) {
 	cucheck(cudaGetDevice(&dev));
 	cucheck(cudaGetDeviceProperties(&dev_prop, dev));
 	dev_memory = dev_prop.totalGlobalMem;
-	uint nsbs = dev_memory / SB_SZ;
-	void *nsbs_addr;
-	cucheck(cudaGetSymbolAddress(&nsbs_addr, nsbs_g));
-	cucheck(cudaMemcpy(nsbs_addr, &nsbs, sizeof(uint), cudaMemcpyHostToDevice));
+	uint nsbs = dev_memory / SB_SZ, sb_sz = SB_SZ;
+	cuset(nsbs_g, uint, nsbs);
+	cuset(sb_sz_g, uint, sb_sz);
 
 	// allocate a fixed number of superblocks, copy them to device
 	uint nsbs_alloc = min(nsbs, NSBS_ALLOC);
 	size_t sbs_sz = MAX_NSBS * sizeof(superblock_t);
 	superblock_t *sbs = (superblock_t *)malloc(sbs_sz);
 	memset(sbs, 0, MAX_NSBS * sizeof(superblock_t));
+	char *base_addr = (char *)~0ull;
 	for(uint isb = 0; isb < nsbs_alloc; isb++) {
 		sbs[isb].noccupied = 0;
-		sbs[isb].id = isb;
+		sbs[isb].size_id = SZ_NONE;
 		cucheck(cudaMalloc(&sbs[isb].ptr, SB_SZ));
+		base_addr = (char *)min((uint64)base_addr, (uint64)sbs[isb].ptr);
 	}
-	void *sbs_addr;
-	cucheck(cudaGetSymbolAddress(&sbs_addr, sbs_g));
-	cucheck(cudaMemcpy(sbs_addr, sbs, sbs_sz, cudaMemcpyHostToDevice));
+	cuset_arr(sbs_g, (superblock_t (*)[MAX_NSBS])&sbs);
+	// also mark free superblocks in the set
+	sbset_t free_sbs;
+	memset(free_sbs, 0, sizeof(free_sbs));
+	for(uint isb = 0; isb < nsbs_alloc; isb++) {
+		uint iword = isb / WORD_SZ, ibit = isb % WORD_SZ;
+		free_sbs[iword] |= 1 << ibit;
+	}
+	cuset_arr(free_sbs_g, &free_sbs);
+	base_addr = (char *)((uint64)base_addr / SB_SZ * SB_SZ);
+	if((uint64)base_addr < dev_memory)
+		base_addr = 0;
+	else
+		base_addr -= dev_memory;
+	cuset(base_addr_g, void *, base_addr);
 
 	// allocate block bits and zero them out
-	void *bit_blocks, nsb_bit_words_addr;
+	void *bit_blocks;
 	uint nsb_bit_words = SB_SZ / BLOCK_STEP;
-	cucheck(cudaGetSymbolAddress(&nsb_bit_words_addr, nsb_bit_words_g));
-	cucheck(cudaMemcpy(nsb_bit_words_addr, &nsb_bit_words, sizeof(uint), 
-										 cudaMemcpyHostToDevice));
+	cuset(nsb_bit_words_g, uint, nsb_bit_words);
 	size_t bit_blocks_sz = nsb_bit_words * nsbs;
 	cucheck(cudaMalloc(&bit_blocks, bit_blocks_sz));
 	cucheck(cudaMemset(bit_blocks, 0, bit_blocks_sz));
-	void *bit_blocks_addr;
-	cucheck(cudaGetSymbolAddress(&bit_blocks_addr, bit_blocks_g));
-	cucheck(cudaMemcpy(bit_blocks_addr, &bit_blocks, sizeof(void *), 
-										 cudaMemcpyHostToDevice));
-	// FINISHED HERE
-	// TODO: finish initialization
+	cuset(block_bits_g, uint *, (uint *)bit_blocks);
+
+	// set sizes info
+	uint nsizes = (MAX_BLOCK_SZ - MIN_BLOCK_SZ) / BLOCK_STEP + 1;
+	cuset(nsizes_g, uint, nsizes);
+	size_info_t size_infos[MAX_NSIZES];
+	memset(size_infos, 0, MAX_NSIZES * sizeof(size_info_t));
+	for(uint isize = 0; isize < nsizes; isize++) {
+		size_info_t *size_info = &size_infos[isize];
+		size_info->block_sz = MIN_BLOCK_SZ + BLOCK_STEP * isize;
+		size_info->nblocks = sb_sz / size_info->block_sz;
+		size_info->hash_step = 
+			max_prime_below(size_info->nblocks / 256 + size_info->nblocks / 64);
+		size_info->roomy_threshold = 0.25 * size_info->nblocks;
+		size_info->busy_threshold = 0.75 * size_info->nblocks;
+	}  // for(each size)
+	cuset_arr(size_infos_g, &size_infos);
+
+	// set grid info
+	uint64 sb_grid[2 * MAX_NSBS];
+	for(uint icell = 0; icell < 2 * MAX_NSBS; icell++) 
+		sb_grid[icell] = grid_cell_init();
+	for(uint isb = 0; isb < nsbs_alloc; isb++)
+		grid_add_sb(sb_grid, base_addr, isb, sbs[isb].ptr, sb_sz);
+	cuset_arr(sb_grid_g, &sb_grid);
 	
-	// zero out what need to be zeroed out
+	// zero out sets (but have some of the free set)
+	cuvar_memset(unallocated_sbs_g, 0, sizeof(unallocated_sbs_g));
+	cuvar_memset(roomy_sbs_g, 0, sizeof(roomy_sbs_g));
+	cuvar_memset(head_sbs_g, ~0, sizeof(head_sbs_g));
+	cuvar_memset(head_locks_g, 0, sizeof(head_locks_g));
+	cuvar_memset(sb_counters_g, 0, sizeof(sb_counters_g));
+	cuvar_memset(counters_g, 1, sizeof(counters_g));
 
 	// free all temporary data structures
 	free(sbs);
