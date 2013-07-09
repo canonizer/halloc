@@ -50,8 +50,6 @@ typedef unsigned long long uint64;
 
 // constants
 
-/** default hash step */
-#define HASH_STEP (NBLOCKS / 256 + NBLOCKS / 64 - 1)
 /** the number of allocation counters*/
 #define NCOUNTERS 2048
 /** thread frequency for initial hashing */
@@ -63,9 +61,9 @@ typedef unsigned long long uint64;
 /** the warp size (32 on current NVidia architectures) */
 #define WARP_SZ 32
 /** maximum number of superblocks */
-#define MAX_NSBS 2048
+#define MAX_NSBS 4096
 /** number of superblocks to allocate initially */
-#define NSBS_ALLOC 64
+#define NSBS_ALLOC 32
 /** the size of SB set, in words; the number of used SBs can be smaller */
 #define SB_SET_SZ (MAX_NSBS / WORD_SZ)
 /** maximum number of sizes supported */
@@ -77,10 +75,12 @@ typedef unsigned long long uint64;
 /** a step to change the value of a distributed counter */
 #define SB_DISTR_STEP 8
 /** a step to change the value of main counter */
-#define SB_MAIN_STEP 512
+#define SB_MAIN_STEP (16 * SB_DISTR_STEP)
+/** a step at which to add to free superblocks */
+#define SB_FREE_ADD_STEP (1 * SB_MAIN_STEP)
 /** maximum number of tries inside a superblock after which the allocation
 		attempt is abandoned */
-#define MAX_NTRIES 128
+#define MAX_NTRIES 64
 /** a "no-sb" constant */
 #define SB_NONE (~0)
 /** a "no-size" constant */
@@ -92,7 +92,7 @@ typedef unsigned long long uint64;
 /** maximum block size (a power of two) */
 #define MAX_BLOCK_SZ 256
 /** default superblock size, in bytes */
-#define SB_SZ (16 * 1024 * 1024)
+#define SB_SZ (8 * 1024 * 1024)
 
 // types 
 
@@ -335,7 +335,8 @@ __device__ inline void sb_dctr_dec
 			// decrement main counter
 			uint new_main_val = atomicSub(&sbs_g[sb].noccupied, SB_MAIN_STEP) - 
 				SB_MAIN_STEP;
-			if(new_main_val <= size_infos_g[size_id].roomy_threshold) {
+			if(new_main_val % SB_FREE_ADD_STEP == 0 &&
+				 new_main_val <= size_infos_g[size_id].roomy_threshold) {
 				// mark superblock as roomy for current size
 				//printf("size_id = %d, sb = %d\n", size_id, sb);
 				sbset_add_to(&roomy_sbs_g[size_id], sb);
@@ -586,6 +587,9 @@ void ha_init(void) {
 		size_info->nblocks = sb_sz / size_info->block_sz;
 		size_info->hash_step = 
 			max_prime_below(size_info->nblocks / 256 + size_info->nblocks / 64);
+		// size_info->hash_step = 
+		// 	max_prime_below(size_info->nblocks / 128);
+		//size_info->hash_step = size_info->nblocks / 256 + size_info->nblocks / 64 - 1;
 		size_info->roomy_threshold = 0.25 * size_info->nblocks;
 		size_info->busy_threshold = 0.75 * size_info->nblocks;
 	}  // for(each size)
