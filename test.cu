@@ -25,9 +25,10 @@
 
 /** testing parameters */
 #define NTHREADS (8 * 1024 * 1024)
-//#define NTHREADS 16384
-#define NMALLOCS 4
+//#define NTHREADS (16 * 1024)
+#define NMALLOCS 8
 #define NTHREADS2 (NTHREADS / NMALLOCS)
+//#define NTHREADS2 NTHREADS
 #define BS 512
 #define NTRIES 32
 //#define NTRIES 1
@@ -109,7 +110,7 @@ void run_test0(void) {
 	thrust::device_ptr<bool> dt_good(d_good);
 	bool passed = thrust::all_of(dt_good, dt_good + nmallocs, 
 															 thrust::identity<bool>());
-	printf("test 6 (correctness of allocation):\n");
+	printf("test 0 (correctness of allocation):\n");
 	printf("test %s\n", passed ? "PASSED" : "FAILED");
 	printf("\n");
 	// FINISHED HERE

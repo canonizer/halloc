@@ -63,7 +63,7 @@ typedef unsigned long long uint64;
 /** maximum number of superblocks */
 #define MAX_NSBS 4096
 /** number of superblocks to allocate initially */
-#define NSBS_ALLOC 32
+#define NSBS_ALLOC 64
 /** the size of SB set, in words; the number of used SBs can be smaller */
 #define SB_SET_SZ (MAX_NSBS / WORD_SZ)
 /** maximum number of sizes supported */
@@ -81,7 +81,7 @@ typedef unsigned long long uint64;
 #define SB_FREE_ADD_STEP (1 * SB_MAIN_STEP)
 /** maximum number of tries inside a superblock after which the allocation
 		attempt is abandoned */
-#define MAX_NTRIES 64
+#define MAX_NTRIES 32
 /** a "no-sb" constant */
 #define SB_NONE (~0)
 /** a "no-size" constant */
@@ -396,11 +396,13 @@ __device__ inline void *sb_alloc_in(uint sb, uint *iblock, uint size_id) {
 	void *p = 0;
 	uint *block_bits = sb_block_bits(sb);
 	// check the superblock occupancy counter
+	// a volatile read doesn't really harm
+	//uint noccupied = *(volatile uint *)&sbs_g[sb].noccupied;
 	uint noccupied = sbs_g[sb].noccupied;
 	if(noccupied >= size_infos_g[size_id].busy_threshold)
 		return 0;
-	uint old_word, iword = ~0;
-	//bool reserved = false;
+	uint old_word, iword;
+	bool reserved = false;
 	// iterate until successfully reserved
 	for(uint itry = 0; itry < MAX_NTRIES; itry++) {
 		//for(uint i = 0; i < 1; i++) {
@@ -411,6 +413,7 @@ __device__ inline void *sb_alloc_in(uint sb, uint *iblock, uint size_id) {
 		old_word = atomicOr(block_bits + iword, alloc_mask);
 		if(!(old_word & alloc_mask)) {
 			// reservation successful
+			reserved = true;
 			break;
 		} else {
 			*iblock = (*iblock + size_infos_g[size_id].hash_step) 
@@ -419,7 +422,7 @@ __device__ inline void *sb_alloc_in(uint sb, uint *iblock, uint size_id) {
 			//	& (size_infos_g[size_id].nblocks - 1);
 		}
 	}
-	if(iword != ~0) {
+	if(reserved) {
 		p = (char *)sbs_g[sb].ptr + *iblock * size_infos_g[size_id].block_sz;
 		sb_dctr_inc(size_id, sb, old_word, iword);
 	}
