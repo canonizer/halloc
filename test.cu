@@ -24,7 +24,7 @@
 #include "halloc.h"
 
 /** testing parameters */
-#define NTHREADS (4 * 1024 * 1024)
+#define NTHREADS (8 * 1024 * 1024)
 //#define NTHREADS 16384
 #define NMALLOCS 4
 #define NTHREADS2 (NTHREADS / NMALLOCS)
