@@ -80,7 +80,7 @@ typedef unsigned long long uint64;
 #define SB_MAIN_STEP 512
 /** maximum number of tries inside a superblock after which the allocation
 		attempt is abandoned */
-#define MAX_NTRIES 64
+#define MAX_NTRIES 128
 /** a "no-sb" constant */
 #define SB_NONE (~0)
 /** a "no-size" constant */
@@ -92,7 +92,7 @@ typedef unsigned long long uint64;
 /** maximum block size (a power of two) */
 #define MAX_BLOCK_SZ 256
 /** default superblock size, in bytes */
-#define SB_SZ (4 * 1024 * 1024)
+#define SB_SZ (16 * 1024 * 1024)
 
 // types 
 
@@ -213,8 +213,8 @@ __host__ inline void grid_add_sb
 	for(uint icell = icell_start; icell <= icell_end; icell++) {
 		uint64 cell = cells[icell];
 		cell |= 1ull << GRID_INIT_POS;
-		void *cell_start_addr = (char *)base_addr + icell * sb_sz;
-		void *cell_end_addr = (char *)base_addr + (icell + 1) * sb_sz - 1;
+		void *cell_start_addr = (char *)base_addr + (uint64)icell * sb_sz;
+		void *cell_end_addr = (char *)base_addr + (uint64)(icell + 1) * sb_sz - 1;
 		if(sb_addr <= cell_start_addr) {
 			// set first superblock in cell
 			uint64 first_sb_mask = ((1ull << GRID_SB_LEN) - 1) << GRID_FIRST_SB_POS;
@@ -227,17 +227,21 @@ __host__ inline void grid_add_sb
 		}
 		uint64 mid_addr_mask = ((1ull << GRID_ADDR_LEN) - 1) << GRID_ADDR_POS;
 		// set the break address
-		if(sb_addr >= cell_start_addr) {
+		if(sb_addr > cell_start_addr) {
 			// current superblock is the second superblock, mid address is its start
 			uint64 mid_addr = ((char *)sb_addr - (char *)cell_start_addr) >> 
 				GRID_ADDR_SH;
 			cell = ~mid_addr_mask & cell | mid_addr << GRID_ADDR_POS;
+			//printf("icell = %d, cell_addr = %p, sb_addr = %p, mid_addr = %llx\n",
+			//			 icell, cell_start_addr, sb_addr, mid_addr);
 		} else if(sb_end_addr <= cell_end_addr) {
 			// current superblock is the first superblock, mid address is end of this
 			// superblock + 1
 			uint64 mid_addr = ((char *)sb_end_addr + 1 - (char *)cell_start_addr) >>
 				GRID_ADDR_SH;
 			cell = ~mid_addr_mask & cell | mid_addr << GRID_ADDR_POS;
+			//printf("icell = %d, cell_addr = %p, sb_addr = %p, mid_addr = %llx\n",
+			//			 icell, cell_start_addr, sb_addr, mid_addr);
 		}
 		// save the modified cell
 		cells[icell] = cell;
@@ -266,9 +270,9 @@ __device__ inline uint grid_second_sb_id(uint64 cell) {
 }
 /** gets the mid-address of the grid cell */
 __device__ inline void *grid_mid_addr(uint icell, uint64 cell) {
-	uint in_sb_addr = ((cell >> GRID_ADDR_POS) & ((1ull << GRID_ADDR_LEN) - 1)) 
+	uint in_sb_addr = ((cell >> GRID_ADDR_POS) & ((1ull << GRID_ADDR_LEN) - 1))
 		<< GRID_ADDR_SH;
-	return (char *)base_addr_g + icell * sb_sz_g + in_sb_addr;
+	return (char *)base_addr_g + (uint64)icell * sb_sz_g + in_sb_addr;
 }
 /** gets the grid cell for the pointer */
 __device__ inline uint64 grid_cell(void *p, uint *icell) {
@@ -333,6 +337,7 @@ __device__ inline void sb_dctr_dec
 				SB_MAIN_STEP;
 			if(new_main_val <= size_infos_g[size_id].roomy_threshold) {
 				// mark superblock as roomy for current size
+				//printf("size_id = %d, sb = %d\n", size_id, sb);
 				sbset_add_to(&roomy_sbs_g[size_id], sb);
 			}
 		}
@@ -367,12 +372,16 @@ __device__ inline void *sb_alloc_in(uint sb, uint *iblock, uint size_id) {
 			// reservation successful, return pointer
 			p = (char *)sbs_g[sb].ptr + *iblock * size_infos_g[size_id].block_sz;
 			break;
-		} else 
+		} else {
 			*iblock = (*iblock + size_infos_g[size_id].hash_step) 
-				% size_infos_g[size_id].nblocks;
+			 	% size_infos_g[size_id].nblocks;
+			//*iblock = (*iblock + size_infos_g[size_id].hash_step) 
+			//	& (size_infos_g[size_id].nblocks - 1);
+		}
 	}
 	if(p)
 		sb_dctr_inc(size_id, sb, old_word, iword);
+	//printf("sbs_g[%d].ptr = %p, allocated p = %p\n", sb, sbs_g[sb].ptr, p);
 	return p;	
 }  // sb_alloc_in
 
@@ -434,14 +443,17 @@ __device__ void *hamalloc(size_t nbytes) {
 	// initial position
 	// TODO: use a real but cheap random number generator
 	uint iblock = (tid * THREAD_FREQ + cv * cv * (cv + 1)) %
-		size_infos_g[size_id].nblocks;
+	 	size_infos_g[size_id].nblocks;
+	//uint iblock = (tid * THREAD_FREQ + cv * cv * (cv + 1)) &
+	//	(size_infos_g[size_id].nblocks - 1);
 	// main allocation loop
 	bool want_alloc = true;
+	uint head_sb = SB_NONE;
 	// use two-level loop to avoid warplocks
 	do {
 		if(want_alloc) {
 			// try allocating in head superblock
-			uint head_sb = head_sbs_g[size_id];
+			head_sb = head_sbs_g[size_id];
 			p = sb_alloc_in(head_sb, &iblock, size_id);
 			bool need_roomy_sb = want_alloc = !p;
 			uint need_roomy_mask;
@@ -462,6 +474,8 @@ __device__ void *hamalloc(size_t nbytes) {
 			}  // while(need new head superblock)
 		}
 	} while(__any(want_alloc));
+	//if(head_sb > 0)
+	//	printf("allocation superblock %d\n", head_sb);
 	if(!p)
 		printf("cannot allocate memory\n");
 	return p;
@@ -473,17 +487,21 @@ __device__ void hafree(void *p) {
 		return;
 	// get the cell descriptor and other data
 	uint icell;
+	//printf("p = %p, base_addr = %p\n", p, base_addr_g);
 	uint64 cell = grid_cell(p, &icell);
 	//uint size_id = grid_size_id(icell, cell, p);
 	uint sb_id = grid_sb_id(icell, cell, p);
+	//uint sb_id = 0;
+	//if(sb_id > 0)
+	//	printf("sb_id = %d, icell = %d\n", sb_id, icell);
 	uint size_id = sbs_g[sb_id].size_id;
-	uint *bits = sb_block_bits(sb_id);
+	uint *block_bits = sb_block_bits(sb_id);
 	// free the memory
 	uint iblock = ((char *)p - (char *)sbs_g[sb_id].ptr) / 
 		size_infos_g[size_id].block_sz;
 	uint iword = iblock / WORD_SZ, ibit = iblock % WORD_SZ;
-	uint new_word = atomicAnd(block_bits_g + iword, ~(1 << ibit)) & 
-		~(1 << ibit);
+	uint new_word = atomicAnd(block_bits + iword, ~(1 << ibit)) & ~(1 << ibit);
+	//printf("freeing: sb_id = %d, p = %p, iblock = %d\n", sb_id, p, iblock);
 	sb_dctr_dec(size_id, sb_id, new_word, iword);
 }  // hafree
 
@@ -531,7 +549,8 @@ void ha_init(void) {
 		cucheck(cudaMalloc(&sbs[isb].ptr, SB_SZ));
 		base_addr = (char *)min((uint64)base_addr, (uint64)sbs[isb].ptr);
 	}
-	cuset_arr(sbs_g, (superblock_t (*)[MAX_NSBS])&sbs);
+	//cuset_arr(sbs_g, (superblock_t (*)[MAX_NSBS])&sbs);
+	cuset_arr(sbs_g, (superblock_t (*)[MAX_NSBS])sbs);
 	// also mark free superblocks in the set
 	sbset_t free_sbs;
 	memset(free_sbs, 0, sizeof(free_sbs));
@@ -590,6 +609,9 @@ void ha_init(void) {
 
 	// free all temporary data structures
 	free(sbs);
+
+	/** ensure that all CUDA stuff has finished */
+	cucheck(cudaStreamSynchronize(0));
 }  // ha_init
 
 void ha_shutdown(void) {

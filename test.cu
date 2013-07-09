@@ -19,12 +19,12 @@
 #include "halloc.h"
 
 /** testing parameters */
-#define NTHREADS (16384)
+#define NTHREADS (4 * 1024 * 1024)
 //#define NTHREADS 16384
-#define NMALLOCS 16
+#define NMALLOCS 4
 #define NTHREADS2 (NTHREADS / NMALLOCS)
 #define BS 512
-#define NTRIES 1
+#define NTRIES 32
 //#define NTRIES 1
 
 // alloc/free kernel
@@ -114,7 +114,7 @@ void run_test2(void) {
 /** latency test */
 void run_test3(void) {
 	double t1 = omp_get_wtime();
-	int lat_ntries = 8, lat_nmallocs = 16 * 1024;
+	int lat_ntries = 4, lat_nmallocs = 16 * 1024;
 	for(int itry = 0; itry < lat_ntries; itry++) {
 		malloc_free_k<<<1, 1>>>(lat_nmallocs);
 		cucheck(cudaGetLastError());
