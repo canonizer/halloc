@@ -51,7 +51,7 @@ typedef unsigned long long uint64;
 // constants
 
 /** the number of allocation counters*/
-#define NCOUNTERS 2048
+#define NCOUNTERS 4096
 /** thread frequency for initial hashing */
 #define THREAD_FREQ 17
 /** allocation counter increment */
@@ -63,7 +63,9 @@ typedef unsigned long long uint64;
 /** maximum number of superblocks */
 #define MAX_NSBS 4096
 /** number of superblocks to allocate initially */
-#define NSBS_ALLOC 64
+//#define NSBS_ALLOC 64
+/** maximum amount of memory to allocate, in MB */
+#define MAX_ALLOC_MEM 512
 /** the size of SB set, in words; the number of used SBs can be smaller */
 #define SB_SET_SZ (MAX_NSBS / WORD_SZ)
 /** maximum number of sizes supported */
@@ -73,15 +75,15 @@ typedef unsigned long long uint64;
 /** number of superblock counters */
 #define NSB_COUNTERS 16
 /** a step at which to  change the value of a distributed counter */
-#define SB_DISTR_STEP 8
-#define SB_DISTR_STEP_MASK (1 << 0 | 1 << 8 | 1 << 24)
+#define SB_DISTR_STEP 16
+//#define SB_DISTR_STEP_MASK (1 << 0 | 1 << 8 | 1 << 24)
 /** a step to change the value of main counter */
 #define SB_MAIN_STEP 512
 /** a step at which to add to free superblocks */
 #define SB_FREE_ADD_STEP (1 * SB_MAIN_STEP)
 /** maximum number of tries inside a superblock after which the allocation
 		attempt is abandoned */
-#define MAX_NTRIES 32
+#define MAX_NTRIES 64
 /** a "no-sb" constant */
 #define SB_NONE (~0)
 /** a "no-size" constant */
@@ -220,7 +222,7 @@ __host__ __device__ inline uint64 grid_cell_init() {
 /** add the superblock to the grid 
 		// TODO: use on device as well, also with size id
 */
-__host__ inline void grid_add_sb
+__host__ void grid_add_sb
 (uint64 *cells, void *base_addr, uint sb, void *sb_addr, uint sb_sz) {
 	void *sb_end_addr = (char *)sb_addr + sb_sz - 1;
 	uint icell_start = ((char *)sb_addr - (char *)base_addr) / sb_sz;
@@ -324,6 +326,7 @@ __device__ inline void sb_dctr_inc
 	if(nword_blocks % SB_DISTR_STEP == 0) {
 		//if(step_is_in_mask(SB_DISTR_STEP_MASK, nword_blocks)) {
 		// increment distributed counter
+		//uint ictr = iword % NSB_COUNTERS;
 		uint ictr = iword % NSB_COUNTERS;
 		//uint old_val = atomicAdd(&sb_counters_g[sb][ictr], SB_DISTR_STEP);
 		uint step = SB_DISTR_STEP;
@@ -385,21 +388,22 @@ __device__ inline void sb_dctr_dec
 }  // sb_dctr_dec
 
 /** allocates memory inside the superblock 
-		@param sb the superblock inside which to allocate
+		@param isb the superblock inside which to allocate
 		@param [in,out] iblock the block from which to start searching
 		@param size_id the size id for the allocation
 		@returns the pointer to the allocated memory, or 0 if unable to allocate
 */
-__device__ inline void *sb_alloc_in(uint sb, uint *iblock, uint size_id) {
-	if(sb == SB_NONE)
+__device__ inline void *sb_alloc_in(uint isb, uint &iblock, size_info_t size_info) {
+	if(isb == SB_NONE)
 		return 0;
 	void *p = 0;
-	uint *block_bits = sb_block_bits(sb);
+	uint *block_bits = sb_block_bits(isb);
+	superblock_t sb = sbs_g[isb];
+	//size_info_t size_info = size_infos_g[size_id];
 	// check the superblock occupancy counter
 	// a volatile read doesn't really harm
 	//uint noccupied = *(volatile uint *)&sbs_g[sb].noccupied;
-	uint noccupied = sbs_g[sb].noccupied;
-	if(noccupied >= size_infos_g[size_id].busy_threshold)
+	if(sb.noccupied >= size_info.busy_threshold)
 		return 0;
 	uint old_word, iword;
 	bool reserved = false;
@@ -407,27 +411,25 @@ __device__ inline void *sb_alloc_in(uint sb, uint *iblock, uint size_id) {
 	for(uint itry = 0; itry < MAX_NTRIES; itry++) {
 		//for(uint i = 0; i < 1; i++) {
 		// try reserve
-		iword = *iblock / WORD_SZ;
-		uint ibit = *iblock % WORD_SZ;
-		uint alloc_mask = 1 << ibit;
+		iword = iblock / WORD_SZ;
+		uint ibit = iblock % WORD_SZ, alloc_mask = 1 << ibit;
 		old_word = atomicOr(block_bits + iword, alloc_mask);
 		if(!(old_word & alloc_mask)) {
 			// reservation successful
 			reserved = true;
 			break;
 		} else {
-			*iblock = (*iblock + size_infos_g[size_id].hash_step) 
-			 	% size_infos_g[size_id].nblocks;
-			//*iblock = (*iblock + size_infos_g[size_id].hash_step) 
+			iblock = (iblock + size_info.hash_step) % size_info.nblocks;
+			//iblock = (iblock + size_infos_g[size_id].hash_step) 
 			//	& (size_infos_g[size_id].nblocks - 1);
 		}
 	}
 	if(reserved) {
-		p = (char *)sbs_g[sb].ptr + *iblock * size_infos_g[size_id].block_sz;
-		sb_dctr_inc(size_id, sb, old_word, iword);
+		p = (char *)sb.ptr + iblock * size_info.block_sz;
+		sb_dctr_inc(~0, isb, old_word, iword);
 	}
 	//printf("sbs_g[%d].ptr = %p, allocated p = %p\n", sb, sbs_g[sb].ptr, p);
-	return p;	
+	return p;
 }  // sb_alloc_in
 
 /** tries to find a new superblock for the given size
@@ -475,12 +477,13 @@ __device__ void *hamalloc(size_t nbytes) {
 	if(!nbytes)
 		return 0;
 	uint size_id = (nbytes - MIN_BLOCK_SZ) / BLOCK_STEP;
+	size_info_t size_info = size_infos_g[size_id];
+	uint head_sb = head_sbs_g[size_id];
 	// the counter is based on block id
 	uint tid = threadIdx.x + blockIdx.x * blockDim.x;
 	uint wid = tid / WORD_SZ, lid = tid % WORD_SZ;
 	uint leader_lid = __ffs(__ballot(1)) - 1;
 	uint icounter = wid & (NCOUNTERS - 1);
-	uint head_sb = head_sbs_g[size_id];
 	uint cv;
 	if(lid == leader_lid)
 		cv = atomicAdd(&counters_g[icounter], COUNTER_INC);
@@ -488,8 +491,10 @@ __device__ void *hamalloc(size_t nbytes) {
 	void *p = 0;
 	// initial position
 	// TODO: use a real but cheap random number generator
-	uint iblock = (tid * THREAD_FREQ + cv * cv * (cv + 1)) %
-	 	size_infos_g[size_id].nblocks;
+	// uint cv2 = cv >> 4, cv1 = cv & 15;
+	// uint iblock = (tid * THREAD_FREQ + cv1 + cv2 * cv2 * (cv2 + 1)) %
+	//  	size_infos_g[size_id].nblocks;
+	uint iblock = (tid * THREAD_FREQ + cv * cv * (cv + 1)) % size_info.nblocks;
 	//uint iblock = (tid * THREAD_FREQ + cv * cv * (cv + 1)) &
 	//	(size_infos_g[size_id].nblocks - 1);
 	// main allocation loop
@@ -500,7 +505,7 @@ __device__ void *hamalloc(size_t nbytes) {
 		if(want_alloc) {
 			// try allocating in head superblock
 			//head_sb = head_sbs_g[size_id];
-			p = sb_alloc_in(head_sb, &iblock, size_id);
+			p = sb_alloc_in(head_sb, iblock, size_info);
 			bool need_roomy_sb = want_alloc = !p;
 			while(__any(need_roomy_sb)) {
 				uint need_roomy_mask = __ballot(need_roomy_sb);
@@ -521,8 +526,6 @@ __device__ void *hamalloc(size_t nbytes) {
 		}
 	} while(__any(want_alloc));
 	//} while(want_alloc);
-	//if(head_sb > 0)
-	//	printf("allocation superblock %d\n", head_sb);
 	//if(!p)
 	//	printf("cannot allocate memory\n");
 	return p;
@@ -582,7 +585,8 @@ void ha_init(void) {
 	cuset(sb_sz_sh_g, uint, SB_SZ_SH);
 
 	// allocate a fixed number of superblocks, copy them to device
-	uint nsbs_alloc = min(nsbs, NSBS_ALLOC);
+	uint nsbs_alloc = (uint)min((uint64)nsbs, 
+												(uint64)MAX_ALLOC_MEM * 1024 * 1024 / sb_sz);
 	size_t sbs_sz = MAX_NSBS * sizeof(superblock_t);
 	superblock_t *sbs = (superblock_t *)malloc(sbs_sz);
 	memset(sbs, 0, MAX_NSBS * sizeof(superblock_t));
@@ -633,8 +637,8 @@ void ha_init(void) {
 		// size_info->hash_step = 
 		// 	max_prime_below(size_info->nblocks / 128);
 		//size_info->hash_step = size_info->nblocks / 256 + size_info->nblocks / 64 - 1;
-		size_info->roomy_threshold = 0.25 * size_info->nblocks;
-		size_info->busy_threshold = 0.75 * size_info->nblocks;
+		size_info->roomy_threshold = 0.4 * size_info->nblocks;
+		size_info->busy_threshold = 0.8 * size_info->nblocks;
 	}  // for(each size)
 	cuset_arr(size_infos_g, &size_infos);
 
