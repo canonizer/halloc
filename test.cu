@@ -37,6 +37,8 @@
 __global__ void malloc_free_k(int ntimes) {
 	for(int i = 0; i < ntimes; i++) {
 		void *p = hamalloc(16);
+		if(!p)
+			printf("cannot allocate memory\n");
 		hafree(p);
 	}
 }  // malloc_free_k
@@ -45,8 +47,11 @@ __global__ void malloc_free_k(int ntimes) {
 __global__ void malloc_k(void **ptrs, int ntimes) {
 	int tid = threadIdx.x + blockIdx.x * blockDim.x;
 	int nthreads = blockDim.x * gridDim.x;
-	for(int iptr = tid; iptr < ntimes * nthreads; iptr += nthreads)
+	for(int iptr = tid; iptr < ntimes * nthreads; iptr += nthreads) {
 		ptrs[iptr] = hamalloc(16);
+		if(!ptrs[iptr])
+			printf("cannot allocate memory\n");
+	}
 }  // malloc_k
 // read-and-free pointer kernel
 __global__ void free_k(void **ptrs, int ntimes) {
@@ -60,8 +65,11 @@ __global__ void free_k(void **ptrs, int ntimes) {
 __global__ void cuda_malloc_k(void **ptrs, int ntimes) {
 	int tid = threadIdx.x + blockIdx.x * blockDim.x;
 	int nthreads = blockDim.x * gridDim.x;
-	for(int iptr = tid; iptr < ntimes * nthreads; iptr += nthreads)
+	for(int iptr = tid; iptr < ntimes * nthreads; iptr += nthreads) {
 		ptrs[iptr] = malloc(16);
+		if(!ptrs[iptr])
+			printf("cannot allocate memory using CUDA malloc()\n");
+	}
 }  // malloc_k
 // read-and-free pointer kernel
 __global__ void cuda_free_k(void **ptrs, int ntimes) {
@@ -183,7 +191,8 @@ void run_test3(void) {
 /** throughput test for CUDA allocator */
 void run_test4(void) {
 	void **d_ptrs;
-	int cuda_nthreads = 32768, cuda_nmallocs = 2, cuda_ntries = 4;
+	int cuda_nthreads = 128 * 1024, cuda_nmallocs = 2, cuda_ntries = 4;
+	cucheck(cudaDeviceSetLimit(cudaLimitMallocHeapSize, 32 * 1024 * 1024));
 	size_t ptrs_sz = cuda_nthreads * cuda_nmallocs * sizeof(void *);
 	cucheck(cudaMalloc(&d_ptrs, ptrs_sz));
 	cucheck(cudaMemset(d_ptrs, 0, ptrs_sz));

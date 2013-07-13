@@ -53,7 +53,7 @@ typedef unsigned long long uint64;
 /** the number of allocation counters*/
 #define NCOUNTERS 4096
 /** thread frequency for initial hashing */
-#define THREAD_FREQ 17
+#define THREAD_FREQ 11
 /** allocation counter increment */
 #define COUNTER_INC 1
 /** word size (the word is uint, which is assumed to be 32-bit) */
@@ -75,7 +75,7 @@ typedef unsigned long long uint64;
 /** number of superblock counters */
 #define NSB_COUNTERS 16
 /** a step at which to  change the value of a distributed counter */
-#define SB_DISTR_STEP 16
+#define SB_DISTR_STEP 8
 //#define SB_DISTR_STEP_MASK (1 << 0 | 1 << 8 | 1 << 24)
 /** a step to change the value of main counter */
 #define SB_MAIN_STEP 512
@@ -83,7 +83,7 @@ typedef unsigned long long uint64;
 #define SB_FREE_ADD_STEP (1 * SB_MAIN_STEP)
 /** maximum number of tries inside a superblock after which the allocation
 		attempt is abandoned */
-#define MAX_NTRIES 64
+#define MAX_NTRIES 512
 /** a "no-sb" constant */
 #define SB_NONE (~0)
 /** a "no-size" constant */
@@ -95,7 +95,7 @@ typedef unsigned long long uint64;
 /** maximum block size (a power of two) */
 #define MAX_BLOCK_SZ 256
 /** default superblock size, in bytes */
-#define SB_SZ_SH (10 + 10 + 3)
+#define SB_SZ_SH (10 + 10 + 4)
 #define SB_SZ (1 << SB_SZ_SH)
 
 // types 
@@ -498,10 +498,13 @@ __device__ void *hamalloc(size_t nbytes) {
 	void *p = 0;
 	// initial position
 	// TODO: use a real but cheap random number generator
-	// uint cv2 = cv >> 4, cv1 = cv & 15;
 	// uint iblock = (tid * THREAD_FREQ + cv1 + cv2 * cv2 * (cv2 + 1)) %
 	//  	size_infos_g[size_id].nblocks;
-	uint iblock = (tid * THREAD_FREQ + cv * cv * (cv + 1)) % size_info.nblocks;
+	// (icounter * WARP_SZ + lid) also provides good initial value qualities
+	// using xor instead of multiplication can provide even higher entropy
+	//uint cv2 = cv >> 3, cv1 = cv & 7;
+	uint iblock = (tid * THREAD_FREQ + 
+								 ((cv * cv) * (cv + 1))) % size_info.nblocks;
 	//uint iblock = (tid * THREAD_FREQ + cv * cv * (cv + 1)) & (size_info.nblocks - 1);
 	// main allocation loop
 	bool want_alloc = true;
@@ -641,8 +644,8 @@ void ha_init(void) {
 		size_info->hash_step = 
 		 	max_prime_below(size_info->nblocks / 256 + size_info->nblocks / 64);
 		//size_info->hash_step = size_info->nblocks / 256 + size_info->nblocks / 64 + 1;
-		size_info->roomy_threshold = 0.4 * size_info->nblocks;
-		size_info->busy_threshold = 0.8 * size_info->nblocks;
+		size_info->roomy_threshold = 0.55 * size_info->nblocks;
+		size_info->busy_threshold = 0.95 * size_info->nblocks;
 	}  // for(each size)
 	cuset_arr(size_infos_g, &size_infos);
 
