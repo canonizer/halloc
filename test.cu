@@ -29,7 +29,7 @@
 #define NMALLOCS 8
 #define NTHREADS2 (NTHREADS / NMALLOCS)
 //#define NTHREADS2 NTHREADS
-#define BS 512
+#define BS 256
 #define NTRIES 32
 //#define NTRIES 1
 

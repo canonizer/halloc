@@ -324,6 +324,12 @@ __device__ inline void sb_dctr_inc
 (uint size_id, uint sb, uint old_word, uint iword) {
 	uint nword_blocks = __popc(old_word);
 	if(nword_blocks % SB_DISTR_STEP == 0) {
+		// TODO: aggregated main counter increment is cheaper
+		// uint lid = threadIdx.x % WARP_SZ;
+		// uint mask = __ballot(1);
+		// uint leader_lid = __ffs(mask) - 1;
+		// if(lid == leader_lid)
+		// 	atomicAdd(&sbs_g[sb].noccupied, SB_DISTR_STEP * __popc(mask));
 		//if(step_is_in_mask(SB_DISTR_STEP_MASK, nword_blocks)) {
 		// increment distributed counter
 		//uint ictr = iword % NSB_COUNTERS;
@@ -420,6 +426,7 @@ __device__ inline void *sb_alloc_in(uint isb, uint &iblock, size_info_t size_inf
 			break;
 		} else {
 			iblock = (iblock + size_info.hash_step) % size_info.nblocks;
+			//iblock = (iblock + size_info.hash_step) &	(size_info.nblocks - 1);
 			//iblock = (iblock + size_infos_g[size_id].hash_step) 
 			//	& (size_infos_g[size_id].nblocks - 1);
 		}
@@ -477,8 +484,8 @@ __device__ void *hamalloc(size_t nbytes) {
 	if(!nbytes)
 		return 0;
 	uint size_id = (nbytes - MIN_BLOCK_SZ) / BLOCK_STEP;
-	size_info_t size_info = size_infos_g[size_id];
 	uint head_sb = head_sbs_g[size_id];
+	size_info_t size_info = size_infos_g[size_id];
 	// the counter is based on block id
 	uint tid = threadIdx.x + blockIdx.x * blockDim.x;
 	uint wid = tid / WORD_SZ, lid = tid % WORD_SZ;
@@ -495,8 +502,7 @@ __device__ void *hamalloc(size_t nbytes) {
 	// uint iblock = (tid * THREAD_FREQ + cv1 + cv2 * cv2 * (cv2 + 1)) %
 	//  	size_infos_g[size_id].nblocks;
 	uint iblock = (tid * THREAD_FREQ + cv * cv * (cv + 1)) % size_info.nblocks;
-	//uint iblock = (tid * THREAD_FREQ + cv * cv * (cv + 1)) &
-	//	(size_infos_g[size_id].nblocks - 1);
+	//uint iblock = (tid * THREAD_FREQ + cv * cv * (cv + 1)) & (size_info.nblocks - 1);
 	// main allocation loop
 	bool want_alloc = true;
 	//uint head_sb;
@@ -633,10 +639,8 @@ void ha_init(void) {
 		size_info->block_sz = MIN_BLOCK_SZ + BLOCK_STEP * isize;
 		size_info->nblocks = sb_sz / size_info->block_sz;
 		size_info->hash_step = 
-			max_prime_below(size_info->nblocks / 256 + size_info->nblocks / 64);
-		// size_info->hash_step = 
-		// 	max_prime_below(size_info->nblocks / 128);
-		//size_info->hash_step = size_info->nblocks / 256 + size_info->nblocks / 64 - 1;
+		 	max_prime_below(size_info->nblocks / 256 + size_info->nblocks / 64);
+		//size_info->hash_step = size_info->nblocks / 256 + size_info->nblocks / 64 + 1;
 		size_info->roomy_threshold = 0.4 * size_info->nblocks;
 		size_info->busy_threshold = 0.8 * size_info->nblocks;
 	}  // for(each size)
