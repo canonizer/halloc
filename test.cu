@@ -25,7 +25,6 @@
 
 /** testing parameters */
 #define NTHREADS (8 * 1024 * 1024)
-//#define NTHREADS (16 * 1024)
 #define NMALLOCS 8
 #define NTHREADS2 (NTHREADS / NMALLOCS)
 //#define NTHREADS2 NTHREADS

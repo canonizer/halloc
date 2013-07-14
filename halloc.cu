@@ -95,7 +95,7 @@ typedef unsigned long long uint64;
 /** maximum block size (a power of two) */
 #define MAX_BLOCK_SZ 256
 /** default superblock size, in bytes */
-#define SB_SZ_SH (10 + 10 + 4)
+#define SB_SZ_SH (10 + 10 + 3)
 #define SB_SZ (1 << SB_SZ_SH)
 
 // types 
@@ -138,8 +138,13 @@ __constant__ uint nsbs_g;
 __constant__ uint nsizes_g;
 /** block bits for all superblocks (content may change) */
 uint * __constant__ block_bits_g;
+/** allocation size id's (content may change); size id for each allocation takes
+		1 byte, with size id "all set" meaning "no allocation" */
+uint * __constant__ alloc_sizes_g;
 /** number of block bit words per superblock */
 __constant__ uint nsb_bit_words_g;
+/** number of alloc sizes per superblock */
+__constant__ uint nsb_alloc_words_g;
 /** information on sizes */
 __constant__ size_info_t size_infos_g[MAX_NSIZES];
 /** base address of the grid; this is the start address of the grid. It is
@@ -314,6 +319,34 @@ __device__ inline uint *sb_block_bits(uint sb) {
 	return block_bits_g + sb * nsb_bit_words_g;
 }  // sb_block_bits
 
+/** gets the alloc sizes for the superblock */
+__device__ inline uint *sb_alloc_sizes(uint sb) {
+	return alloc_sizes_g + sb * nsb_alloc_words_g;
+}
+
+/** sets allocation size for the allocation 
+		@param alloc_words allocation data for this superblock
+		@param ichunk the first allocated chunk
+		@param size_id the size id of the allocation
+ */
+__device__ inline void sb_set_alloc_size(uint *alloc_words, uint ichunk, uint
+		size_id) {
+	uint iword = ichunk / 4, ibyte = ichunk % 4, shift = ibyte * 8;
+	uint mask = (size_id << shift) | (~0 ^ (0xffu << shift));
+	atomicAnd(&alloc_words[iword], mask);
+	//((unsigned char *)alloc_words)[ichunk] = size_id;
+	//__threadfence();
+}  // sb_set_alloc_size
+
+/** gets (and resets) allocation size for the allocation */
+__device__ inline uint sb_get_reset_alloc_size(uint *alloc_words, uint ichunk) {
+	// unsigned char *alloc_bytes = (unsigned char *)alloc_words;
+	// return alloc_bytes[ichunk];
+	uint iword = ichunk / 4, ibyte = ichunk % 4, shift = ibyte * 8;
+	uint mask = 0xffu << shift;
+	return (atomicOr(&alloc_words[iword], mask) >> shift) & 0xffu;
+}  // sb_get_reset_alloc_size
+
 /** increment distributed superblock counter 
 		@param size_id the size id for allocation; ignored 
 		@param sb the superblock id
@@ -399,7 +432,8 @@ __device__ inline void sb_dctr_dec
 		@param size_id the size id for the allocation
 		@returns the pointer to the allocated memory, or 0 if unable to allocate
 */
-__device__ inline void *sb_alloc_in(uint isb, uint &iblock, size_info_t size_info) {
+__device__ inline void *sb_alloc_in(uint isb, uint &iblock, size_info_t
+		size_info, uint size_id) {
 	if(isb == SB_NONE)
 		return 0;
 	void *p = 0;
@@ -432,7 +466,11 @@ __device__ inline void *sb_alloc_in(uint isb, uint &iblock, size_info_t size_inf
 		}
 	}
 	if(reserved) {
+		// write allocation size
+		uint *alloc_sizes = sb_alloc_sizes(isb);
 		p = (char *)sb.ptr + iblock * size_info.block_sz;
+		// TODO: support chunks of other size
+		sb_set_alloc_size(alloc_sizes, iblock, size_id);
 		sb_dctr_inc(~0, isb, old_word, iword);
 	}
 	//printf("sbs_g[%d].ptr = %p, allocated p = %p\n", sb, sbs_g[sb].ptr, p);
@@ -514,7 +552,7 @@ __device__ void *hamalloc(size_t nbytes) {
 		if(want_alloc) {
 			// try allocating in head superblock
 			//head_sb = head_sbs_g[size_id];
-			p = sb_alloc_in(head_sb, iblock, size_info);
+			p = sb_alloc_in(head_sb, iblock, size_info, size_id);
 			bool need_roomy_sb = want_alloc = !p;
 			while(__any(need_roomy_sb)) {
 				uint need_roomy_mask = __ballot(need_roomy_sb);
@@ -549,7 +587,10 @@ __device__ void hafree(void *p) {
 	uint64 cell = grid_cell(p, &icell);
 	//uint size_id = grid_size_id(icell, cell, p);
 	uint sb_id = grid_sb_id(icell, cell, p);
-	uint size_id = sbs_g[sb_id].size_id;
+	uint *alloc_sizes = sb_alloc_sizes(sb_id);
+	uint ichunk = (uint)((char *)p - (char *)sbs_g[sb_id].ptr) / BLOCK_STEP;
+	uint size_id = sb_get_reset_alloc_size(alloc_sizes, ichunk);
+	//uint size_id = sbs_g[sb_id].size_id;
 	uint *block_bits = sb_block_bits(sb_id);
 	// free the memory
 	uint iblock = (uint)((char *)p - (char *)sbs_g[sb_id].ptr) / 
@@ -624,13 +665,19 @@ void ha_init(void) {
 	cuset(base_addr_g, void *, base_addr);
 
 	// allocate block bits and zero them out
-	void *bit_blocks;
-	uint nsb_bit_words = SB_SZ / BLOCK_STEP;
+	void *bit_blocks, *alloc_sizes;
+	uint nsb_bit_words = SB_SZ / (BLOCK_STEP * WORD_SZ), 
+		nsb_alloc_words = SB_SZ / (BLOCK_STEP * 4);
 	cuset(nsb_bit_words_g, uint, nsb_bit_words);
-	size_t bit_blocks_sz = nsb_bit_words * nsbs;
+	cuset(nsb_alloc_words_g, uint, nsb_alloc_words);
+	size_t bit_blocks_sz = nsb_bit_words * nsbs * sizeof(uint), 
+		alloc_sizes_sz = nsb_alloc_words * nsbs * sizeof(uint);
 	cucheck(cudaMalloc(&bit_blocks, bit_blocks_sz));
 	cucheck(cudaMemset(bit_blocks, 0, bit_blocks_sz));
 	cuset(block_bits_g, uint *, (uint *)bit_blocks);
+	cucheck(cudaMalloc(&alloc_sizes, alloc_sizes_sz));
+	cucheck(cudaMemset(alloc_sizes, 0xff, alloc_sizes_sz));
+	cuset(alloc_sizes_g, uint *, (uint *)alloc_sizes);
 
 	// set sizes info
 	uint nsizes = (MAX_BLOCK_SZ - MIN_BLOCK_SZ) / BLOCK_STEP + 1;
