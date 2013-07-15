@@ -1,6 +1,6 @@
 NAME=halloc
 SRC_C=*.cu
-SRC_H=*.h
+SRC_H=*.h *.cuh
 SRC=$(SRC_C) $(SRC_H)
 TGT=$(NAME)
 TMP=*~ \\\#* $(TGT)
