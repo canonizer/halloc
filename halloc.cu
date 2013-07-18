@@ -45,7 +45,7 @@ __device__ inline uint new_sb_for_size(uint size_id) {
 		uint cur_head = *(volatile uint *)&head_sbs_g[size_id];
 		uint new_head = SB_NONE;
 		if(cur_head == SB_NONE || 
-			*(volatile uint *)&sbs_g[cur_head].noccupied >=
+			*(volatile uint *)&sb_counters_g[cur_head] >=
 			size_infos_g[size_id].busy_threshold) {
 			// replacement really necessary; first try among roomy sb's of current 
 			// size
@@ -154,7 +154,8 @@ __device__ void hafree(void *p) {
 	uint iword = iblock / WORD_SZ, ibit = iblock % WORD_SZ;
 	uint new_word = atomicAnd(block_bits + iword, ~(1 << ibit)) & ~(1 << ibit);
 	//printf("freeing: sb_id = %d, p = %p, iblock = %d\n", sb_id, p, iblock);
-	sb_dctr_dec(size_id, sb_id, new_word, iword);
+	//sb_dctr_dec(size_id, sb_id, new_word, iword);
+	sb_ctr_dec(size_id, sb_id, size_infos_g[size_id].block_sz / BLOCK_STEP, new_word);
 }  // hafree
 
 void ha_init(void) {
@@ -179,7 +180,6 @@ void ha_init(void) {
 	memset(sbs, 0, MAX_NSBS * sizeof(superblock_t));
 	char *base_addr = (char *)~0ull;
 	for(uint isb = 0; isb < nsbs_alloc; isb++) {
-		sbs[isb].noccupied = 0;
 		sbs[isb].size_id = SZ_NONE;
 		cucheck(cudaMalloc(&sbs[isb].ptr, SB_SZ));
 		base_addr = (char *)min((uint64)base_addr, (uint64)sbs[isb].ptr);
@@ -228,8 +228,8 @@ void ha_init(void) {
 		size_info->hash_step = 
 		 	max_prime_below(size_info->nblocks / 256 + size_info->nblocks / 64);
 		//size_info->hash_step = size_info->nblocks / 256 + size_info->nblocks / 64 + 1;
-		size_info->roomy_threshold = 0.55 * size_info->nblocks;
-		size_info->busy_threshold = 0.95 * size_info->nblocks;
+		size_info->roomy_threshold = 0.5 * size_info->nblocks;
+		size_info->busy_threshold = 0.8 * size_info->nblocks;
 	}  // for(each size)
 	cuset_arr(size_infos_g, &size_infos);
 
@@ -242,18 +242,19 @@ void ha_init(void) {
 	cuset_arr(sb_grid_g, &sb_grid);
 	
 	// zero out sets (but have some of the free set)
+	//fprintf(stderr, "started cuda-memsetting\n");
 	cuvar_memset(unallocated_sbs_g, 0, sizeof(unallocated_sbs_g));
 	cuvar_memset(roomy_sbs_g, 0, sizeof(roomy_sbs_g));
 	cuvar_memset(head_sbs_g, ~0, sizeof(head_sbs_g));
 	cuvar_memset(head_locks_g, 0, sizeof(head_locks_g));
 	cuvar_memset(sb_counters_g, 0, sizeof(sb_counters_g));
 	cuvar_memset(counters_g, 1, sizeof(counters_g));
+	//fprintf(stderr, "finished cuda-memsetting\n");
+	cucheck(cudaStreamSynchronize(0));
 
 	// free all temporary data structures
 	free(sbs);
 
-	/** ensure that all CUDA stuff has finished */
-	cucheck(cudaStreamSynchronize(0));
 }  // ha_init
 
 void ha_shutdown(void) {
