@@ -45,8 +45,8 @@ __device__ inline uint new_sb_for_size(uint size_id) {
 		uint cur_head = *(volatile uint *)&head_sbs_g[size_id];
 		uint new_head = SB_NONE;
 		if(cur_head == SB_NONE || 
-			*(volatile uint *)&sb_counters_g[cur_head] >=
-			size_infos_g[size_id].busy_threshold) {
+			 sb_count(*(volatile uint *)&sb_counters_g[cur_head]) >=
+			 size_infos_g[size_id].busy_threshold) {
 			// replacement really necessary; first try among roomy sb's of current 
 			// size
 			new_head = sbset_get_from(&roomy_sbs_g[size_id], cur_head);
@@ -180,8 +180,11 @@ void ha_init(void) {
 	size_t sbs_sz = MAX_NSBS * sizeof(superblock_t);
 	superblock_t *sbs = (superblock_t *)malloc(sbs_sz);
 	memset(sbs, 0, MAX_NSBS * sizeof(superblock_t));
+	uint *sb_counters = (uint *)malloc(MAX_NSBS * sizeof(uint));
+	memset(sbs, 0xff, MAX_NSBS * sizeof(uint));
 	char *base_addr = (char *)~0ull;
 	for(uint isb = 0; isb < nsbs_alloc; isb++) {
+		sb_counters[isb] = sb_counter_val(0, SZ_NONE, SZ_NONE);
 		sbs[isb].size_id = SZ_NONE;
 		cucheck(cudaMalloc(&sbs[isb].ptr, SB_SZ));
 		base_addr = (char *)min((uint64)base_addr, (uint64)sbs[isb].ptr);
@@ -249,13 +252,14 @@ void ha_init(void) {
 	cuvar_memset(roomy_sbs_g, 0, sizeof(roomy_sbs_g));
 	cuvar_memset(head_sbs_g, ~0, sizeof(head_sbs_g));
 	cuvar_memset(head_locks_g, 0, sizeof(head_locks_g));
-	cuvar_memset(sb_counters_g, 0, sizeof(sb_counters_g));
+	//cuvar_memset(sb_counters_g, 0, sizeof(sb_counters_g));
 	cuvar_memset(counters_g, 1, sizeof(counters_g));
 	//fprintf(stderr, "finished cuda-memsetting\n");
 	cucheck(cudaStreamSynchronize(0));
 
 	// free all temporary data structures
 	free(sbs);
+	free(sb_counters);
 
 }  // ha_init
 

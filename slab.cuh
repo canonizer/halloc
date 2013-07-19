@@ -74,7 +74,7 @@ __device__ __forceinline__ void sb_ctr_inc
 		// allocation size is same for all superblocks
 		uint change = alloc_sz * __popc(__ballot(sb_id == leader_sb_id));
 		if(lid == leader_lid)
-			atomicAdd(&sb_counters_g[sb_id], change);
+			sb_counter_inc(&sb_counters_g[sb_id], change);
 		want_inc = want_inc && sb_id != leader_sb_id;
 	}  // while
 }  // sb_ctr_inc
@@ -92,18 +92,18 @@ __device__ __forceinline__ void sb_ctr_dec
 		// allocation size is same for all superblocks
 		uint change = alloc_sz * __popc(__ballot(sb_id == leader_sb_id));
 		if(lid == leader_lid) {
-			uint old_val = atomicSub(&sb_counters_g[sb_id], change);
+			uint old_val = sb_count(sb_counter_dec(&sb_counters_g[sb_id], change));
 			uint new_val = old_val - change;
 			if((old_val + SB_FREE_STEP - 1) % SB_FREE_STEP != 
 				 (new_val + SB_FREE_STEP - 1) % SB_FREE_STEP) {
 				uint threshold = size_infos_g[size_id].roomy_threshold;
-				if(new_val <= threshold) {
+				if(new_val <= threshold && new_val > 0) {
 					// mark superblock as roomy for current size
 					sbset_add_to(&roomy_sbs_g[size_id], sb_id);
 				}
 			}
 		}
-		want_inc = want_inc && sb_id != leader_sb_id;	
+		want_inc = want_inc && sb_id != leader_sb_id;
 	}  // while
 }  // sb_ctr_dec
 
@@ -121,7 +121,7 @@ __device__ __forceinline__ void *sb_alloc_in
 	uint *block_bits = sb_block_bits(isb);
 	superblock_t sb = sbs_g[isb];
 	// check the superblock occupancy counter
-	if(sb_counters_g[isb] >= size_info.busy_threshold)
+	if(sb_count(sb_counters_g[isb]) >= size_info.busy_threshold)
 		return 0;
 	uint iword;
 	bool reserved = false;
