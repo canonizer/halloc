@@ -29,7 +29,7 @@
 #define NTHREADS2 (NTHREADS / NMALLOCS)
 //#define NTHREADS2 NTHREADS
 #define BS 256
-#define NTRIES 32
+#define NTRIES 8
 //#define NTRIES 1
 
 // alloc/free kernel
@@ -173,7 +173,7 @@ void run_test2(void) {
 void run_test3(void) {
 	double t1 = omp_get_wtime();
 	int lat_ntries = 4, lat_nmallocs = 16 * 1024;
-	//int lat_ntries = 1, lat_nmallocs = 2;
+	//int lat_ntries = 1, lat_nmallocs = 1;
 	for(int itry = 0; itry < lat_ntries; itry++) {
 		malloc_free_k<<<1, 1>>>(lat_nmallocs);
 		cucheck(cudaGetLastError());

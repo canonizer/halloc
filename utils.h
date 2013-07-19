@@ -74,14 +74,22 @@ __device__ inline bool try_lock(uint *mutex) {
 __device__ inline void lock(uint *mutex) {
 	while(!try_lock(mutex));
 }
-/** single-thread-per-warp unlock, threadfence included */
+/** single-thread-per-warp unlock, without threadfence */
 __device__ inline void unlock(uint *mutex) {
-	__threadfence();
+	//__threadfence();
 	atomicExch(mutex, 0);
 }
 /** waits until the mutex is unlocked, but does not attempt locking */
 __device__ inline void wait_unlock(uint *mutex) {
 	while(*(volatile uint *)mutex);
+	// {
+	// 	uint64 t1 = clock64();
+	// 	while(clock64() - t1 < 1);
+	// }
+}
+/** gets the warp leader based on the mask */
+__device__ inline uint warp_leader(uint mask) {
+	return __ffs(mask) - 1;
 }
 
 /** find the largest prime number below this one, and not dividing this one */

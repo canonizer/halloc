@@ -75,6 +75,10 @@ __device__ inline uint grid_size_id(uint icell, uint64 cell, void *p) {
 }
 /** gets the (de)allocation superblock id for the pointer */
 __device__ inline uint grid_sb_id(uint icell, uint64 cell, void *p) {
-	void *midp = grid_mid_addr(icell, cell);
-	return p < midp ? grid_first_sb_id(cell) : grid_second_sb_id(cell);
+	//void *midp = grid_mid_addr(icell, cell);
+	uint in_sb_addr = ((cell >> GRID_ADDR_POS) & ((1ull << GRID_ADDR_LEN) - 1))
+		<< GRID_ADDR_SH;
+	uint in_p = (char *)p - (char *)base_addr_g - (uint64)icell * sb_sz_g;
+	//return p < midp ? grid_first_sb_id(cell) : grid_second_sb_id(cell);
+	return in_p < in_sb_addr ? grid_first_sb_id(cell) : grid_second_sb_id(cell);
 }

@@ -17,11 +17,11 @@ typedef struct {
 	/** slab size id */
 	uint size_id;
 	/** slab chunk id (currently ignored) */
-	uint chunk_id;
+	//uint chunk_id;
 	/** slab state */
-	uint state;
+	//uint state;
 	/** slab mutex (for changing states) */
-	uint mutex;
+	//uint mutex;
 	/** pointer to memory owned by superblock */
 	void *ptr;
 } superblock_t;
@@ -34,7 +34,7 @@ typedef struct {
 /** a "no-sb" constant */
 #define SB_NONE (~0)
 /** default superblock size, in bytes */
-#define SB_SZ_SH (10 + 10 + 2)
+#define SB_SZ_SH (10 + 10 + 3)
 #define SB_SZ (1 << SB_SZ_SH)
 
 /** positions and sizes related to slab counters */
@@ -46,7 +46,6 @@ typedef struct {
 #define SB_HEAD_SZ 1
 #define SB_COUNT_POS 10
 #define SB_COUNT_SZ 22
-
 
 // functions for manipulation with counter values
 /** gets slab allocation count */
@@ -81,12 +80,12 @@ __device__ inline uint sb_counter_dec(uint *counter, uint change) {
 }
 
 /** a single-thread-in-warp slab lock; it loops until the slab is locked */
-__device__ inline void sb_lock(superblock_t *sb) {
-	lock(&sb->mutex);
-}
+// __device__ inline void sb_lock(superblock_t *sb) {
+// 	lock(&sb->mutex);
+// }
 /** a single-thread-in-warp slab unlock; it loops until the slab is unlocked */
-__device__ inline void sb_unlock(superblock_t *sb) {
-	unlock(&sb->mutex);
-}
+// __device__ inline void sb_unlock(superblock_t *sb) {
+// 	unlock(&sb->mutex);
+// }
 
 #endif

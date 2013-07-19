@@ -73,12 +73,12 @@ __device__ inline void sb_try_mark_free(uint sb, uint size_id, bool from_head) {
 	if(atomicCAS(&sb_counters_g[sb], old_counter, new_counter)) {
 		// slab marked as free, remove it from roomy and add to free
 		if(!from_head)
-			sbset_remove_from(&roomy_sbs_g[size_id], sb);
+			sbset_remove_from(roomy_sbs_g[size_id], sb);
 		sbs_g[sb].size_id = SZ_NONE;
-		sbset_add_to(&free_sbs_g, sb);
+		sbset_add_to(free_sbs_g, sb);
 	} else if(from_head) {
 		// add it to non-free
-		sbset_add_to(&roomy_sbs_g[size_id], sb);
+		sbset_add_to(roomy_sbs_g[size_id], sb);
 	}
 }  // sb_try_mark_free
 
@@ -91,7 +91,7 @@ __device__ __forceinline__ bool sb_ctr_inc
 	bool want_inc = true;
 	uint mask, old_counter, lid = threadIdx.x % WARP_SZ;
 	while(mask = __ballot(want_inc)) {
-		uint leader_lid = __ffs(mask) - 1, leader_sb_id = sb_id;
+		uint leader_lid = warp_leader(mask), leader_sb_id = sb_id;
 		leader_sb_id = __shfl((int)leader_sb_id, leader_lid);
 		// allocation size is same for all superblocks
 		uint change = alloc_sz * __popc(__ballot(sb_id == leader_sb_id));
@@ -113,7 +113,7 @@ __device__ __forceinline__ void sb_ctr_dec
 	bool want_inc = true;
 	uint mask, lid = threadIdx.x % WARP_SZ;
 	while(mask = __ballot(want_inc)) {
-		uint leader_lid = __ffs(mask) - 1, leader_sb_id = sb_id;
+		uint leader_lid = warp_leader(mask), leader_sb_id = sb_id;
 		leader_sb_id = __shfl((int)leader_sb_id, leader_lid);
 		// allocation size is same for all superblocks
 		uint change = alloc_sz * __popc(__ballot(sb_id == leader_sb_id));
@@ -127,7 +127,7 @@ __device__ __forceinline__ void sb_ctr_dec
 				uint threshold = size_infos_g[size_id].roomy_threshold;
 				if(new_count <= threshold && old_count > threshold && new_count > 0) {
 					// mark superblock as roomy for current size
-					sbset_add_to(&roomy_sbs_g[size_id], sb_id);
+					sbset_add_to(roomy_sbs_g[size_id], sb_id);
 				} else if(new_count == 0) {
 					sb_try_mark_free(sb_id, size_id, false);
 				}  // if(slab position in sets changes)
@@ -142,11 +142,13 @@ __device__ __forceinline__ void sb_ctr_dec
 		@returns the new head superblock id if found, and SB_NONE if none
 		@remarks this function should be called by at most 1 thread in a warp at a time
 */
-__device__ __forceinline__ uint new_sb_for_size(uint size_id) {
+__device__ inline uint new_sb_for_size(uint size_id) {
 	// try locking size id
+	// TODO: make those who failed to lock attempt to allocate
+	// in what free space left there
+	uint cur_head = *(volatile uint *)&head_sbs_g[size_id];
 	if(try_lock(&head_locks_g[size_id])) {
 		// locked successfully, check if really need replacing blocks
-		uint cur_head = *(volatile uint *)&head_sbs_g[size_id];
 		uint new_head = SB_NONE;
 		uint roomy_threshold = size_infos_g[size_id].roomy_threshold;
 		if(cur_head == SB_NONE || 
@@ -154,20 +156,21 @@ __device__ __forceinline__ uint new_sb_for_size(uint size_id) {
 			 size_infos_g[size_id].busy_threshold) {
 			// replacement really necessary; first try among roomy sb's of current 
 			// size
-			while((new_head = sbset_get_from(&roomy_sbs_g[size_id], new_head)) 
+			while((new_head = sbset_get_from(roomy_sbs_g[size_id]))
 						!= SB_NONE) {
 				// try set head
 				uint old_counter = atomicOr(&sb_counters_g[new_head], 1 << SB_HEAD_POS);
 				if(sb_is_head(old_counter) || sb_size_id(old_counter) != size_id) {
 					// drop the block and go for another
+					// TODO: process this as another head detachment
 					atomicAnd(&sb_counters_g[new_head], ~(1 << SB_HEAD_POS));
-				} else 
+				} else
 					break;
 			}  // while(searching through new heads)
 			if(new_head == SB_NONE) {
 				// try getting from free superblocks; hear actually getting one 
 				// always means success, as only truly free block get to this bit array
-				new_head = sbset_get_from(&free_sbs_g);
+				new_head = sbset_get_from(free_sbs_g);
 				if(new_head != SB_NONE) {
 					// fill in the slab
 					*(volatile uint *)&sbs_g[new_head].size_id = size_id;
@@ -179,7 +182,6 @@ __device__ __forceinline__ uint new_sb_for_size(uint size_id) {
 					while(atomicCAS(&sb_counters_g[new_head], old_counter, new_counter) !=
 								old_counter);
 					//atomicCAS(&sb_counters_g[new_head], old_counter, new_counter);
-					__threadfence();
 				}  // if(got new head from free slabs)
 			}  // if(didn't get new head from roomy slabs)
 			if(new_head != SB_NONE) {
@@ -192,7 +194,7 @@ __device__ __forceinline__ uint new_sb_for_size(uint size_id) {
 																			 ~(1 << SB_HEAD_POS));
 					if(sb_count(old_counter) <= roomy_threshold) {
 						// mark as roomy
-						sbset_add_to(&roomy_sbs_g[size_id], cur_head);
+						sbset_add_to(roomy_sbs_g[size_id], cur_head);
 					} else if(sb_count(old_counter) == 0) {
 						// very unlikely
 						sb_try_mark_free(cur_head, size_id, true);
@@ -208,7 +210,11 @@ __device__ __forceinline__ uint new_sb_for_size(uint size_id) {
 		return new_head;
 	} else {
 		// someone else working on current head superblock; 
-		wait_unlock(&head_locks_g[size_id]);
+		while(true) {
+			if(*(volatile uint *)&head_sbs_g[size_id] != cur_head ||
+			 	 *(volatile uint *)&head_locks_g[size_id] == 0)
+			 	break;
+		}
 		return *(volatile uint *)&head_sbs_g[size_id];
 	}
 }  // new_sb_for_size
@@ -228,8 +234,12 @@ __device__ __forceinline__ void *sb_alloc_in
 	superblock_t sb = sbs_g[isb];
 	// check the superblock occupancy counter
 	uint sb_counter = sb_counters_g[isb];
-	if(sb_count(sb_counter) >= size_info.busy_threshold)
-		return 0;
+	if(sb_count(sb_counter) >= size_info.busy_threshold) {
+		uint count = sb_count(*(volatile uint *)&sb_counters_g[isb]);
+		// try allocate nevertheless if head is locked
+		if(count >= size_info.nblocks || !*(volatile uint *)&head_locks_g[size_id])
+			return 0;
+	}
 	uint iword, ibit;
 	bool reserved = false;
 	// iterate until successfully reserved

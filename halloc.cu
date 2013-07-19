@@ -31,7 +31,7 @@
 /** allocation counters */
 __device__ uint counters_g[NCOUNTERS];
 
-__device__ void *hamalloc(size_t nbytes) {
+__device__ void *hamalloc(uint nbytes) {
 	// ignore zero-sized allocations
 	if(!nbytes)
 		return 0;
@@ -41,8 +41,8 @@ __device__ void *hamalloc(size_t nbytes) {
 	// the counter is based on block id
 	uint tid = threadIdx.x + blockIdx.x * blockDim.x;
 	uint wid = tid / WORD_SZ, lid = tid % WORD_SZ;
-	uint leader_lid = __ffs(__ballot(1)) - 1;
-	uint icounter = wid & (NCOUNTERS - 1);
+	uint leader_lid = warp_leader(__ballot(1));
+	uint icounter = wid % NCOUNTERS;
 	uint cv;
 	if(lid == leader_lid)
 		cv = atomicAdd(&counters_g[icounter], COUNTER_INC);
@@ -70,7 +70,7 @@ __device__ void *hamalloc(size_t nbytes) {
 			while(__any(need_roomy_sb)) {
 				uint need_roomy_mask = __ballot(need_roomy_sb);
 				if(need_roomy_sb) {
-					leader_lid = __ffs(need_roomy_mask) - 1;
+					leader_lid = warp_leader(need_roomy_mask);
 					uint leader_size_id = __shfl((int)size_id, leader_lid);
 					// here try to check whether a new SB is really needed, and get the
 					// new SB
@@ -101,7 +101,7 @@ __device__ void hafree(void *p) {
 	uint64 cell = grid_cell(p, &icell);
 	//uint size_id = grid_size_id(icell, cell, p);
 	uint sb_id = grid_sb_id(icell, cell, p);
-	uint *alloc_sizes = sb_alloc_sizes(sb_id);
+	//uint *alloc_sizes = sb_alloc_sizes(sb_id);
 	//uint ichunk = (uint)((char *)p - (char *)sbs_g[sb_id].ptr) / BLOCK_STEP;
 	//uint size_id = sb_get_reset_alloc_size(alloc_sizes, ichunk);
 	uint size_id = sbs_g[sb_id].size_id;
@@ -144,9 +144,9 @@ void ha_init(void) {
 	for(uint isb = 0; isb < nsbs_alloc; isb++) {
 		sb_counters[isb] = sb_counter_val(0, false, SZ_NONE, SZ_NONE);
 		sbs[isb].size_id = SZ_NONE;
-		sbs[isb].chunk_id = SZ_NONE;
-		sbs[isb].state = SB_FREE;
-		sbs[isb].mutex = 0;
+		//sbs[isb].chunk_id = SZ_NONE;
+		//sbs[isb].state = SB_FREE;
+		//sbs[isb].mutex = 0;
 		cucheck(cudaMalloc(&sbs[isb].ptr, SB_SZ));
 		base_addr = (char *)min((uint64)base_addr, (uint64)sbs[isb].ptr);
 	}
@@ -195,7 +195,7 @@ void ha_init(void) {
 		size_info->hash_step = 
 		 	max_prime_below(size_info->nblocks / 256 + size_info->nblocks / 64);
 		//size_info->hash_step = size_info->nblocks / 256 + size_info->nblocks / 64 + 1;
-		size_info->roomy_threshold = 0.5 * size_info->nblocks;
+		size_info->roomy_threshold = 0.25 * size_info->nblocks;
 		size_info->busy_threshold = 0.8 * size_info->nblocks;
 	}  // for(each size)
 	cuset_arr(size_infos_g, &size_infos);
@@ -212,6 +212,7 @@ void ha_init(void) {
 	//fprintf(stderr, "started cuda-memsetting\n");
 	//cuvar_memset(unallocated_sbs_g, 0, sizeof(unallocated_sbs_g));
 	cuvar_memset(roomy_sbs_g, 0, sizeof(roomy_sbs_g));
+	//cuvar_memset(roomy_sbs_g, 0, (MAX_NSIZES * SB_SET_SZ * sizeof(uint)));
 	cuvar_memset(head_sbs_g, ~0, sizeof(head_sbs_g));
 	cuvar_memset(head_locks_g, 0, sizeof(head_locks_g));
 	cuvar_memset(counters_g, 1, sizeof(counters_g));
