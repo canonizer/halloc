@@ -16,6 +16,7 @@
 #include "grid.cuh"
 #include "sbset.cuh"
 #include "size-info.cuh"
+
 #include "slab.cuh"
 
 /** the number of allocation counters*/
@@ -27,52 +28,8 @@
 /** maximum amount of memory to allocate, in MB */
 #define MAX_ALLOC_MEM 512
 
-/** head superblocks for each size */
-__device__ uint head_sbs_g[MAX_NSIZES];
-/** superblock operation locks per size */
-__device__ uint head_locks_g[MAX_NSIZES];
 /** allocation counters */
 __device__ uint counters_g[NCOUNTERS];
-
-/** tries to find a new superblock for the given size
-		@returns the new head superblock id if found, and SB_NONE if none
-		@remarks this function should be called by at most 1 thread in a warp at a time
-*/
-__device__ inline uint new_sb_for_size(uint size_id) {
-	// try locking size id
-	if(!atomicExch(&head_locks_g[size_id], 1)) {
-		// locked successfully, check if really need replacing blocks
-		uint cur_head = *(volatile uint *)&head_sbs_g[size_id];
-		uint new_head = SB_NONE;
-		if(cur_head == SB_NONE || 
-			 sb_count(*(volatile uint *)&sb_counters_g[cur_head]) >=
-			 size_infos_g[size_id].busy_threshold) {
-			// replacement really necessary; first try among roomy sb's of current 
-			// size
-			new_head = sbset_get_from(&roomy_sbs_g[size_id], cur_head);
-			if(new_head == SB_NONE) {
-				// try getting from free superblocks
-				new_head = sbset_get_from(&free_sbs_g, SB_NONE);
-			}
-			if(new_head != SB_NONE) {
-				// replace current head
-				head_sbs_g[size_id] = new_head;
-				*(volatile uint *)&sbs_g[new_head].size_id = size_id;
-			}
-		} else {
-			// just re-read the new head superblock
-			new_head = *(volatile uint *)&head_sbs_g[size_id];
-		}
-		// unlock
-		__threadfence();
-		atomicExch(&head_locks_g[size_id], 0);
-		return new_head;
-	} else {
-		// someone else working on current head superblock; 
-		while(*(volatile uint *)&head_locks_g[size_id]);
-		return *(volatile uint *)&head_sbs_g[size_id];
-	}
-}  // new_sb_for_size
 
 __device__ void *hamalloc(size_t nbytes) {
 	// ignore zero-sized allocations
@@ -126,9 +83,10 @@ __device__ void *hamalloc(size_t nbytes) {
 					}
 				}
 			}  // while(need new head superblock)
+			// just quickly return 0
+			// return 0;
 		}
 	} while(__any(want_alloc));
-	//} while(want_alloc);
 	//if(!p)
 	//	printf("cannot allocate memory\n");
 	return p;
@@ -184,13 +142,17 @@ void ha_init(void) {
 	memset(sbs, 0xff, MAX_NSBS * sizeof(uint));
 	char *base_addr = (char *)~0ull;
 	for(uint isb = 0; isb < nsbs_alloc; isb++) {
-		sb_counters[isb] = sb_counter_val(0, SZ_NONE, SZ_NONE);
+		sb_counters[isb] = sb_counter_val(0, false, SZ_NONE, SZ_NONE);
 		sbs[isb].size_id = SZ_NONE;
+		sbs[isb].chunk_id = SZ_NONE;
+		sbs[isb].state = SB_FREE;
+		sbs[isb].mutex = 0;
 		cucheck(cudaMalloc(&sbs[isb].ptr, SB_SZ));
 		base_addr = (char *)min((uint64)base_addr, (uint64)sbs[isb].ptr);
 	}
 	//cuset_arr(sbs_g, (superblock_t (*)[MAX_NSBS])&sbs);
 	cuset_arr(sbs_g, (superblock_t (*)[MAX_NSBS])sbs);
+	cuset_arr(sb_counters_g, (uint (*)[MAX_NSBS])sb_counters);
 	// also mark free superblocks in the set
 	sbset_t free_sbs;
 	memset(free_sbs, 0, sizeof(free_sbs));
@@ -248,11 +210,10 @@ void ha_init(void) {
 	
 	// zero out sets (but have some of the free set)
 	//fprintf(stderr, "started cuda-memsetting\n");
-	cuvar_memset(unallocated_sbs_g, 0, sizeof(unallocated_sbs_g));
+	//cuvar_memset(unallocated_sbs_g, 0, sizeof(unallocated_sbs_g));
 	cuvar_memset(roomy_sbs_g, 0, sizeof(roomy_sbs_g));
 	cuvar_memset(head_sbs_g, ~0, sizeof(head_sbs_g));
 	cuvar_memset(head_locks_g, 0, sizeof(head_locks_g));
-	//cuvar_memset(sb_counters_g, 0, sizeof(sb_counters_g));
 	cuvar_memset(counters_g, 1, sizeof(counters_g));
 	//fprintf(stderr, "finished cuda-memsetting\n");
 	cucheck(cudaStreamSynchronize(0));

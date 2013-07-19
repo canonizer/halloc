@@ -64,6 +64,26 @@ __device__ inline uint step_next_dist(uint mask, uint val) {
 	return res ? res : WORD_SZ - val;
 }
 
+/** tries single-thread-per-warp lock 
+		@returns true if locking is successful and false otherwise
+ */
+__device__ inline bool try_lock(uint *mutex) {
+	return atomicExch(mutex, 1) == 0;
+}
+/** single-thread-per-warp lock; loops until the lock is acquired */
+__device__ inline void lock(uint *mutex) {
+	while(!try_lock(mutex));
+}
+/** single-thread-per-warp unlock, threadfence included */
+__device__ inline void unlock(uint *mutex) {
+	__threadfence();
+	atomicExch(mutex, 0);
+}
+/** waits until the mutex is unlocked, but does not attempt locking */
+__device__ inline void wait_unlock(uint *mutex) {
+	while(*(volatile uint *)mutex);
+}
+
 /** find the largest prime number below this one, and not dividing this one */
 uint max_prime_below(uint n);
 

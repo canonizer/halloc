@@ -24,7 +24,7 @@
 #include "halloc.h"
 
 /** testing parameters */
-#define NTHREADS (8 * 1024 * 1024)
+#define NTHREADS (4 * 1024 * 1024)
 #define NMALLOCS 8
 #define NTHREADS2 (NTHREADS / NMALLOCS)
 //#define NTHREADS2 NTHREADS
@@ -173,6 +173,7 @@ void run_test2(void) {
 void run_test3(void) {
 	double t1 = omp_get_wtime();
 	int lat_ntries = 4, lat_nmallocs = 16 * 1024;
+	//int lat_ntries = 1, lat_nmallocs = 2;
 	for(int itry = 0; itry < lat_ntries; itry++) {
 		malloc_free_k<<<1, 1>>>(lat_nmallocs);
 		cucheck(cudaGetLastError());
