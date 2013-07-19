@@ -83,7 +83,7 @@ __device__ __forceinline__ void sb_ctr_inc
 		size_id is just ignored, allocation size is expressed in chunks
  */
 __device__ __forceinline__ void sb_ctr_dec
-(uint size_id, uint sb_id, uint alloc_sz, uint new_word) {
+(uint size_id, uint sb_id, uint alloc_sz) {
 	bool want_inc = true;
 	uint mask, lid = threadIdx.x % WARP_SZ;
 	while(mask = __ballot(want_inc)) {
@@ -143,11 +143,12 @@ __device__ __forceinline__ void *sb_alloc_in
 	}
 	if(reserved) {
 		// write allocation size
-		uint *alloc_sizes = sb_alloc_sizes(isb);
 		p = (char *)sb.ptr + iblock * size_info.block_sz;
 		// TODO: support chunks of other size
-		sb_set_alloc_size(alloc_sizes, iblock, size_id);
-		sb_ctr_inc(~0, isb, size_info.block_sz / BLOCK_STEP);
-	} 
+		//uint *alloc_sizes = sb_alloc_sizes(isb);
+		//sb_set_alloc_size(alloc_sizes, iblock, size_id);
+		//sb_ctr_inc(~0, isb, size_info.block_sz / BLOCK_STEP);
+		sb_ctr_inc(~0, isb, 1);
+	}
 	return p;
 }  // sb_alloc_in

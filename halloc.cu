@@ -144,18 +144,20 @@ __device__ void hafree(void *p) {
 	//uint size_id = grid_size_id(icell, cell, p);
 	uint sb_id = grid_sb_id(icell, cell, p);
 	uint *alloc_sizes = sb_alloc_sizes(sb_id);
-	uint ichunk = (uint)((char *)p - (char *)sbs_g[sb_id].ptr) / BLOCK_STEP;
-	uint size_id = sb_get_reset_alloc_size(alloc_sizes, ichunk);
-	//uint size_id = sbs_g[sb_id].size_id;
+	//uint ichunk = (uint)((char *)p - (char *)sbs_g[sb_id].ptr) / BLOCK_STEP;
+	//uint size_id = sb_get_reset_alloc_size(alloc_sizes, ichunk);
+	uint size_id = sbs_g[sb_id].size_id;
 	uint *block_bits = sb_block_bits(sb_id);
 	// free the memory
 	uint iblock = (uint)((char *)p - (char *)sbs_g[sb_id].ptr) / 
 		size_infos_g[size_id].block_sz;
 	uint iword = iblock / WORD_SZ, ibit = iblock % WORD_SZ;
-	uint new_word = atomicAnd(block_bits + iword, ~(1 << ibit)) & ~(1 << ibit);
+	//uint new_word = atomicAnd(block_bits + iword, ~(1 << ibit)) & ~(1 << ibit);
+	atomicAnd(block_bits + iword, ~(1 << ibit));
 	//printf("freeing: sb_id = %d, p = %p, iblock = %d\n", sb_id, p, iblock);
 	//sb_dctr_dec(size_id, sb_id, new_word, iword);
-	sb_ctr_dec(size_id, sb_id, size_infos_g[size_id].block_sz / BLOCK_STEP, new_word);
+	//sb_ctr_dec(size_id, sb_id, size_infos_g[size_id].block_sz / BLOCK_STEP);
+	sb_ctr_dec(size_id, sb_id, 1);
 }  // hafree
 
 void ha_init(void) {
