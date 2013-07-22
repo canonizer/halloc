@@ -25,9 +25,17 @@ uint busy_threshold;
 #define SZ_NONE (~0)
 /** block step (16 bytes by default), a power of two */
 #define BLOCK_STEP 16
-/** minimum block size (a power of two) */
+/** minimum unit size (allocation blocks are either 2 or 3 units) */
+#define MIN_UNIT_SZ 8
+/** maximum unit size */
+#define MAX_UNIT_SZ 1024
+/** unit step */
+#define UNIT_STEP 2
+/** the number of units */
+#define NUNITS 8
+/** minimum block size */
 #define MIN_BLOCK_SZ 16
-/** maximum block size (a power of two) */
-#define MAX_BLOCK_SZ 256
+/** maximum block size */
+#define MAX_BLOCK_SZ 3072
 
 #endif

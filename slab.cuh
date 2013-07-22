@@ -11,6 +11,8 @@ uint * __constant__ block_bits_g;
 uint * __constant__ alloc_sizes_g;
 /** number of block bit words per superblock */
 __constant__ uint nsb_bit_words_g;
+/** shift for number of words per superblock */
+__constant__ uint nsb_bit_words_sh_g;
 /** number of alloc sizes per superblock */
 __constant__ uint nsb_alloc_words_g;
 /** superblock size (common for all superblocks, power-of-two) */
@@ -35,11 +37,14 @@ __device__ uint head_locks_g[MAX_NSIZES];
 
 /** gets block bits for superblock */
 __device__ inline uint *sb_block_bits(uint sb) {
-	return block_bits_g + sb * nsb_bit_words_g;
+	// TODO: use a shift constant
+	//return block_bits_g + sb * nsb_bit_words_g;
+	return block_bits_g + (sb << nsb_bit_words_sh_g);
 }  // sb_block_bits
 
 /** gets the alloc sizes for the superblock */
 __device__ inline uint *sb_alloc_sizes(uint sb) {
+	// TODO: use a shift constant
 	return alloc_sizes_g + sb * nsb_alloc_words_g;
 }
 
@@ -94,7 +99,8 @@ __device__ __forceinline__ bool sb_ctr_inc
 		uint leader_lid = warp_leader(mask), leader_sb_id = sb_id;
 		leader_sb_id = __shfl((int)leader_sb_id, leader_lid);
 		// allocation size is same for all superblocks
-		uint change = alloc_sz * __popc(__ballot(sb_id == leader_sb_id));
+		//uint change = alloc_sz * __popc(__ballot(sb_id == leader_sb_id));
+		uint change = __popc(__ballot(sb_id == leader_sb_id));
 		if(lid == leader_lid)
 			old_counter = sb_counter_inc(&sb_counters_g[sb_id], change);
 		if(leader_sb_id == sb_id)
@@ -116,7 +122,8 @@ __device__ __forceinline__ void sb_ctr_dec
 		uint leader_lid = warp_leader(mask), leader_sb_id = sb_id;
 		leader_sb_id = __shfl((int)leader_sb_id, leader_lid);
 		// allocation size is same for all superblocks
-		uint change = alloc_sz * __popc(__ballot(sb_id == leader_sb_id));
+		//uint change = alloc_sz * __popc(__ballot(sb_id == leader_sb_id));
+		uint change = __popc(__ballot(sb_id == leader_sb_id));
 		if(lid == leader_lid) {
 			uint old_counter = sb_counter_dec(&sb_counters_g[sb_id], change);
 			if(!sb_is_head(old_counter)) {
@@ -236,6 +243,7 @@ __device__ __forceinline__ void *sb_alloc_in
 	uint sb_counter = sb_counters_g[isb];
 	if(sb_count(sb_counter) >= size_info.busy_threshold) {
 		uint count = sb_count(*(volatile uint *)&sb_counters_g[isb]);
+		//uint count = sb_count(sb_counter);
 		// try allocate nevertheless if head is locked
 		if(count >= size_info.nblocks || !*(volatile uint *)&head_locks_g[size_id])
 			return 0;

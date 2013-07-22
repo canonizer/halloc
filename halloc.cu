@@ -31,11 +31,28 @@
 /** allocation counters */
 __device__ uint counters_g[NCOUNTERS];
 
+/** gets size id from size in bytes */
+__device__ inline uint size_id_from_nbytes(uint nbytes) {
+	nbytes = max(nbytes, MIN_BLOCK_SZ);
+	uint iunit = __ffs(nbytes) - 5, unit = 1 << (iunit + 3);
+	// update unit if it is too small
+	if(nbytes > 3 * unit) {
+		iunit += 1;
+		unit *= 2;
+	}	
+	// allocation size is either 2 * unit or 3 * unit
+	if(nbytes <= 2 * unit)
+		return 2 * iunit;
+	else
+		return 2 * iunit + 1;
+	//return (nbytes - MIN_BLOCK_SZ) / BLOCK_STEP;
+}  // size_id_from_nbytes
+
 __device__ void *hamalloc(uint nbytes) {
-	// ignore zero-sized allocations
-	if(!nbytes)
+	if(nbytes > MAX_BLOCK_SZ)
 		return 0;
-	uint size_id = (nbytes - MIN_BLOCK_SZ) / BLOCK_STEP;
+	// ignore zero-sized allocations
+	uint size_id = size_id_from_nbytes(nbytes);
 	uint head_sb = head_sbs_g[size_id];
 	size_info_t size_info = size_infos_g[size_id];
 	// the counter is based on block id
@@ -56,7 +73,7 @@ __device__ void *hamalloc(uint nbytes) {
 	// using xor instead of multiplication can provide even higher entropy
 	//uint cv2 = cv >> 3, cv1 = cv & 7;
 	uint iblock = (tid * THREAD_FREQ + 
-								 ((cv * cv) * (cv + 1))) % size_info.nblocks;
+							 ((cv * cv) * (cv + 1))) % size_info.nblocks;
 	//uint iblock = (tid * THREAD_FREQ + cv * cv * (cv + 1)) & (size_info.nblocks - 1);
 	// main allocation loop
 	bool want_alloc = true;
@@ -107,8 +124,10 @@ __device__ void hafree(void *p) {
 	uint size_id = sbs_g[sb_id].size_id;
 	uint *block_bits = sb_block_bits(sb_id);
 	// free the memory
-	uint iblock = (uint)((char *)p - (char *)sbs_g[sb_id].ptr) / 
-		size_infos_g[size_id].block_sz;
+	// TODO: this division is what eats all performance
+	// replace it with reciprocal multiplication
+	uint iblock = (uint)((char *)p - (char *)sbs_g[sb_id].ptr) /
+			size_infos_g[size_id].block_sz;
 	uint iword = iblock / WORD_SZ, ibit = iblock % WORD_SZ;
 	//uint new_word = atomicAnd(block_bits + iword, ~(1 << ibit)) & ~(1 << ibit);
 	atomicAnd(block_bits + iword, ~(1 << ibit));
@@ -172,7 +191,10 @@ void ha_init(void) {
 	void *bit_blocks, *alloc_sizes;
 	uint nsb_bit_words = SB_SZ / (BLOCK_STEP * WORD_SZ), 
 		nsb_alloc_words = SB_SZ / (BLOCK_STEP * 4);
+	// TODO: make move numbers into constants
+	uint nsb_bit_words_sh = SB_SZ_SH - (4 + 5);
 	cuset(nsb_bit_words_g, uint, nsb_bit_words);
+	cuset(nsb_bit_words_sh_g, uint, nsb_bit_words_sh);
 	cuset(nsb_alloc_words_g, uint, nsb_alloc_words);
 	size_t bit_blocks_sz = nsb_bit_words * nsbs * sizeof(uint), 
 		alloc_sizes_sz = nsb_alloc_words * nsbs * sizeof(uint);
@@ -184,13 +206,15 @@ void ha_init(void) {
 	cuset(alloc_sizes_g, uint *, (uint *)alloc_sizes);
 
 	// set sizes info
-	uint nsizes = (MAX_BLOCK_SZ - MIN_BLOCK_SZ) / BLOCK_STEP + 1;
+	//uint nsizes = (MAX_BLOCK_SZ - MIN_BLOCK_SZ) / BLOCK_STEP + 1;
+	uint nsizes = 2 * NUNITS;
 	cuset(nsizes_g, uint, nsizes);
 	size_info_t size_infos[MAX_NSIZES];
 	memset(size_infos, 0, MAX_NSIZES * sizeof(size_info_t));
 	for(uint isize = 0; isize < nsizes; isize++) {
+		uint iunit = isize / 2, unit = 1 << (iunit + 3);
 		size_info_t *size_info = &size_infos[isize];
-		size_info->block_sz = MIN_BLOCK_SZ + BLOCK_STEP * isize;
+		size_info->block_sz = isize % 2 ? 3 * unit : 2 * unit;
 		size_info->nblocks = sb_sz / size_info->block_sz;
 		size_info->hash_step = 
 		 	max_prime_below(size_info->nblocks / 256 + size_info->nblocks / 64);

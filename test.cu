@@ -139,9 +139,9 @@ void run_test1(void) {
 	double t2 = omp_get_wtime();
 	double nmallocs = (double)NTHREADS * NTRIES;
 	printf("test 1 (malloc/free inside each thread):\n");
-	printf("test duration %.3lf ms\n", (t2 - t1) * 1e3);
+	printf("test duration %.2lf ms\n", (t2 - t1) * 1e3);
 	printf("%.0lf malloc/free pairs in the test\n", nmallocs);
-	printf("allocation speed: %.3lf Mpairs/s\n", nmallocs / (t2 - t1) * 1e-6);
+	printf("allocation speed: %.2lf Mpairs/s\n", nmallocs / (t2 - t1) * 1e-6);
 	printf("\n");
 }  // run_test1
 
@@ -163,9 +163,9 @@ void run_test2(void) {
 	cucheck(cudaFree(d_ptrs));
 	double nmallocs = (double)NMALLOCS * NTHREADS2 * NTRIES;
 	printf("test 2 (first all mallocs, then all frees):\n");
-	printf("test duration %.3lf ms\n", (t2 - t1) * 1e3);
+	printf("test duration %.2lf ms\n", (t2 - t1) * 1e3);
 	printf("%.0lf malloc/free pairs in the test\n", nmallocs);
-	printf("allocation speed: %.3lf Mpairs/s\n", nmallocs / (t2 - t1) * 1e-6);
+	printf("allocation speed: %.2lf Mpairs/s\n", nmallocs / (t2 - t1) * 1e-6);
 	printf("\n");
 }  // run_test2
 
@@ -182,7 +182,7 @@ void run_test3(void) {
 	double t2 = omp_get_wtime();
 	double nmallocs = (double)lat_nmallocs * lat_ntries;
 	printf("test 3 (latency):\n");
-	printf("test duration %.3lf ms\n", (t2 - t1) * 1e3);
+	printf("test duration %.2lf ms\n", (t2 - t1) * 1e3);
 	printf("%.0lf malloc/free pairs in the test\n", nmallocs);
 	printf("latency: %.0lf ns\n", (t2 - t1) * 1e9 / nmallocs);
 	printf("\n");
@@ -209,9 +209,9 @@ void run_test4(void) {
 	cucheck(cudaFree(d_ptrs));
 	double nmallocs = (double)cuda_nmallocs * cuda_nthreads * cuda_ntries;
 	printf("test 4 (CUDA, first all mallocs, then all frees):\n");
-	printf("test duration %.3lf ms\n", (t2 - t1) * 1e3);
+	printf("test duration %.2lf ms\n", (t2 - t1) * 1e3);
 	printf("%.0lf malloc/free pairs in the test\n", nmallocs);
-	printf("allocation speed: %.3lf Mpairs/s\n", nmallocs / (t2 - t1) * 1e-6);
+	printf("allocation speed: %.2lf Mpairs/s\n", nmallocs / (t2 - t1) * 1e-6);
 	printf("\n");
 }  // run_test4
 
@@ -238,10 +238,10 @@ void run_test5(void) {
 	cucheck(cudaFree(d_ptrs));
 	double nmallocs = (double)NMALLOCS * NTHREADS2 * ntries;
 	printf("test 5 (first mallocs, then frees, separate timing):\n");
-	printf("test duration: malloc %.3lf ms, free %.3lf ms\n", 
+	printf("test duration: malloc %.2lf ms, free %.2lf ms\n", 
 				 (t2 - t1) * 1e3, (t3 - t2) * 1e3);
 	printf("%.0lf malloc/free pairs in the test\n", nmallocs);
-	printf("speed: %.3lf Mmallocs/s, %.3lf Mfrees/s\n", 
+	printf("speed: %.2lf Mmallocs/s, %.2lf Mfrees/s\n", 
 				 nmallocs / (t2 - t1) * 1e-6, nmallocs / (t3 - t2) * 1e-6);
 	printf("\n");
 }  // run_test5
