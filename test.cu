@@ -30,6 +30,7 @@
 //#define NTHREADS2 NTHREADS
 #define BS 256
 #define NTRIES 8
+#define MEMORY (4 * 16 * NTHREADS)
 //#define NTRIES 1
 
 // alloc/free kernel
@@ -247,7 +248,7 @@ void run_test5(void) {
 }  // run_test5
 
 int main(int argc, char **argv) {
-	ha_init();
+	ha_init(MEMORY);
 	run_test0();
 	run_test1();
 	run_test2();

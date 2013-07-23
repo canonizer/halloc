@@ -137,7 +137,7 @@ __device__ void hafree(void *p) {
 	sb_ctr_dec(size_id, sb_id, 1);
 }  // hafree
 
-void ha_init(void) {
+void ha_init(size_t memory) {
 	// TODO: initialize all devices
 	// get total device memory (in bytes) & total number of superblocks
 	uint64 dev_memory;
@@ -152,8 +152,7 @@ void ha_init(void) {
 	cuset(sb_sz_sh_g, uint, SB_SZ_SH);
 
 	// allocate a fixed number of superblocks, copy them to device
-	uint nsbs_alloc = (uint)min((uint64)nsbs, 
-												(uint64)MAX_ALLOC_MEM * 1024 * 1024 / sb_sz);
+	uint nsbs_alloc = (uint)min((uint64)nsbs, (uint64)memory / sb_sz);
 	size_t sbs_sz = MAX_NSBS * sizeof(superblock_t);
 	superblock_t *sbs = (superblock_t *)malloc(sbs_sz);
 	memset(sbs, 0, MAX_NSBS * sizeof(superblock_t));
