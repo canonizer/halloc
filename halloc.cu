@@ -48,9 +48,8 @@ __device__ inline uint size_id_from_nbytes(uint nbytes) {
 	//return (nbytes - MIN_BLOCK_SZ) / BLOCK_STEP;
 }  // size_id_from_nbytes
 
-__device__ void *hamalloc(uint nbytes) {
-	if(nbytes > MAX_BLOCK_SZ)
-		return 0;
+/** procedure for small allocation */
+__device__ void *hamalloc_small(uint nbytes) {
 	// ignore zero-sized allocations
 	uint size_id = size_id_from_nbytes(nbytes);
 	uint head_sb = head_sbs_g[size_id];
@@ -107,17 +106,22 @@ __device__ void *hamalloc(uint nbytes) {
 	//if(!p)
 	//	printf("cannot allocate memory\n");
 	return p;
-}  // hamalloc
+}  // hamalloc_small
 
-__device__ void hafree(void *p) {
-	// ignore zero pointer
-	if(!p)
-		return;
-	// get the cell descriptor and other data
-	uint icell;
-	uint64 cell = grid_cell(p, &icell);
-	//uint size_id = grid_size_id(icell, cell, p);
-	uint sb_id = grid_sb_id(icell, cell, p);
+/** procedure for large allocation */
+__device__ void *hamalloc_large(uint nbytes) {
+	return malloc(nbytes);
+}  // hamalloc_large
+
+__device__ void *hamalloc(uint nbytes) {
+	if(nbytes <= MAX_BLOCK_SZ)
+		return hamalloc_small(nbytes);
+	else
+		return hamalloc_large(nbytes);
+} // hamalloc
+
+/** procedure for small free*/
+__device__ void hafree_small(void *p, uint sb_id) {
 	//uint *alloc_sizes = sb_alloc_sizes(sb_id);
 	//uint ichunk = (uint)((char *)p - (char *)sbs_g[sb_id].ptr) / BLOCK_STEP;
 	//uint size_id = sb_get_reset_alloc_size(alloc_sizes, ichunk);
@@ -135,6 +139,26 @@ __device__ void hafree(void *p) {
 	//sb_dctr_dec(size_id, sb_id, new_word, iword);
 	//sb_ctr_dec(size_id, sb_id, size_infos_g[size_id].block_sz / BLOCK_STEP);
 	sb_ctr_dec(size_id, sb_id, 1);
+}  // hafree_small
+
+/** procedure for large free */
+__device__ void hafree_large(void *p) {
+	return free(p);
+}  // hafree_large
+
+__device__ void hafree(void *p) {
+	// ignore zero pointer
+	if(!p)
+		return;
+	// get the cell descriptor and other data
+	uint icell;
+	uint64 cell = grid_cell(p, &icell);
+	//uint size_id = grid_size_id(icell, cell, p);
+	uint sb_id = grid_sb_id(icell, cell, p);
+	if(sb_id != GRID_SB_NONE)
+		hafree_small(p, sb_id);
+	else
+		hafree_large(p);
 }  // hafree
 
 void ha_init(size_t memory) {
@@ -150,6 +174,11 @@ void ha_init(size_t memory) {
 	cuset(nsbs_g, uint, nsbs);
 	cuset(sb_sz_g, uint, sb_sz);
 	cuset(sb_sz_sh_g, uint, SB_SZ_SH);
+
+	// split memory between halloc and CUDA allocator
+	uint64 halloc_memory = 0.75 * memory;
+	uint64 cuda_memory = memory - halloc_memory;
+	cucheck(cudaDeviceSetLimit(cudaLimitMallocHeapSize, cuda_memory));
 
 	// allocate a fixed number of superblocks, copy them to device
 	uint nsbs_alloc = (uint)min((uint64)nsbs, (uint64)memory / sb_sz);

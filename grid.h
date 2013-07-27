@@ -14,6 +14,7 @@
 #define GRID_SECOND_SB_POS 26
 #define GRID_ADDR_POS 39
 #define GRID_ADDR_SH 4
+#define GRID_SB_NONE ((1 << GRID_SB_LEN) - 1)
 
 /** initial value for the grid cell */
 __host__ __device__ inline uint64 grid_cell_init() {

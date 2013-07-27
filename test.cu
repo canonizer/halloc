@@ -193,7 +193,7 @@ void run_test3(void) {
 void run_test4(void) {
 	void **d_ptrs;
 	int cuda_nthreads = 128 * 1024, cuda_nmallocs = 2, cuda_ntries = 4;
-	cucheck(cudaDeviceSetLimit(cudaLimitMallocHeapSize, 32 * 1024 * 1024));
+	//cucheck(cudaDeviceSetLimit(cudaLimitMallocHeapSize, 32 * 1024 * 1024));
 	size_t ptrs_sz = cuda_nthreads * cuda_nmallocs * sizeof(void *);
 	cucheck(cudaMalloc(&d_ptrs, ptrs_sz));
 	cucheck(cudaMemset(d_ptrs, 0, ptrs_sz));
