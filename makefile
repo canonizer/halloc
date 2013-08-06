@@ -1,9 +1,9 @@
 NAME=halloc
-SRC_C=*.cu
-SRC_H=*.h *.cuh
+SRC_C=src/*.cu
+SRC_H=src/*.h src/*.cuh
 SRC=$(SRC_C) $(SRC_H)
-TGT=$(NAME)
-TMP=*~ \\\#* $(TGT)
+TGT=bin/$(NAME)
+TMP=*~ \\\#* src/*~ src/\\\#* $(TGT)
 
 build: $(TGT)
 $(TGT):	$(SRC) makefile
