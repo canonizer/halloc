@@ -1,4 +1,5 @@
-/** @file hamalloc.cu implementation of halloc allocator */
+/** @file halloc.cu implementation of halloc allocator */
+#define HALLOCLIB_COMPILING
 
 #include <algorithm>
 #include <math.h>
@@ -13,10 +14,12 @@
 #include "slab.h"
 #include "utils.h"
 
+// global variables used by multiple .cuh files
+#include "globals.cuh"
+
 #include "grid.cuh"
 #include "sbset.cuh"
 #include "size-info.cuh"
-
 #include "slab.cuh"
 
 /** the number of allocation counters*/

@@ -1,5 +1,6 @@
 /** @file test.cu testing a simple idea of an allocator */
 
+#include <halloc.h>
 #include <omp.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,7 +22,7 @@
 	}																																			\
 	}
 
-#include "halloc.h"
+//#include "halloc.h"
 
 /** testing parameters */
 #define NTHREADS (4 * 1024 * 1024)

@@ -1,6 +1,6 @@
 /** @file sbset.cuh slab set implementation */
 
-extern __constant__ uint nsbs_g;
+//extern __constant__ uint nsbs_g;
 
 __device__ inline uint sbset_get_from(sbset_t sbset) {
 	// TODO: maybe do several trials to be sure

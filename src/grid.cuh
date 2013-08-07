@@ -6,8 +6,8 @@ void * __constant__ base_addr_g;
 /** superblock grid */
 __device__ uint64 sb_grid_g[2 * MAX_NSBS];
 
-extern __constant__ uint sb_sz_g;
-extern __constant__ uint sb_sz_sh_g;
+//extern __constant__ uint sb_sz_g;
+//extern __constant__ uint sb_sz_sh_g;
 
 /** add the superblock to the grid 
 		// TODO: use on device as well, also with size id

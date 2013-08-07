@@ -1,9 +1,6 @@
 #include "utils.h"
 #include "size-info.h"
 
-/** real possible number of superblocks (based on device memory and superblock
-		size) */
-__constant__ uint nsbs_g;
 /** block bits for all superblocks (content may change) */
 uint * __constant__ block_bits_g;
 /** allocation size id's (content may change); size id for each allocation takes
@@ -15,10 +12,6 @@ __constant__ uint nsb_bit_words_g;
 __constant__ uint nsb_bit_words_sh_g;
 /** number of alloc sizes per superblock */
 __constant__ uint nsb_alloc_words_g;
-/** superblock size (common for all superblocks, power-of-two) */
-__constant__ uint sb_sz_g;
-/** superblock size shift (for fast division operations) */
-__constant__ uint sb_sz_sh_g;
 
 /** superblock descriptors */
 __device__ superblock_t sbs_g[MAX_NSBS];
