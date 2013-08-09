@@ -26,4 +26,15 @@ void ha_shutdown(void);
 
 }
 
+// overrides for malloc and free if requested; currently unstable
+//#ifdef HALLOC_OVERRIDE_STDC
+#if 0
+__device__ void *malloc(uint nbytes) throw() { 
+		return hamalloc(nbytes);
+	}
+inline __device__ void free(void *p) throw() { hafree(p); }
+extern "C" __host__ void free(void *p) throw();
+#endif
+
+
 #endif
