@@ -67,7 +67,8 @@ __device__ void *atomicCAS(void **address, void *compare, void *val) {
 /** a function to insert a point into a grid on device; this function can be
 		called concurrently by multiple threads */
 __device__ void insert_point
-(point_list_t **grid, int ncells, const fvec3 * __restrict__ ps, int ip) {
+(point_list_t **grid, int ncells, const fvec3 * __restrict__ ps, int ip,
+		point_list_t *plist) {
 	// compute the cell
 	fvec3 p = ps[ip];
 	ivec3 cell;
@@ -85,12 +86,6 @@ __device__ void insert_point
 																															cell.z));
 	//point_list_t * volatile *pcell = grid + ip % (ncells * ncells * ncells);
 	
-	// allocate memory for list element
-	point_list_t *plist = (point_list_t *)hamalloc(sizeof(point_list_t));
-	if(!plist) {
-		printf("cannot allocate memory\n");
-		return;
-	}
 	//point_list_t *plist = (point_list_t *)malloc(sizeof(point_list_t));
 	plist->ip = ip;
 	plist->next = 0;
@@ -110,13 +105,16 @@ __device__ void insert_point
 
 /** frees the grid cell; one cell can be simultaneously freed by one thread only
 		*/
-__device__ void free_cell(point_list_t **grid, int ncells, ivec3 cell) {
+__device__ void free_cell(point_list_t **grid, int ncells, ivec3 cell,
+point_list_t *pre_chains) {
 	point_list_t **pcell = grid + cell.x + ncells * (cell.y + ncells * cell.z);
 	// free all cells
 	point_list_t *plist = *pcell, *pnext;
 	while(plist) {
 		pnext = plist->next;
-		hafree(plist);
+		//plist->next = 0;
+		if(!pre_chains)
+			hafree(plist);
 		//free(plist);
 		plist = pnext;
 	}
@@ -124,15 +122,29 @@ __device__ void free_cell(point_list_t **grid, int ncells, ivec3 cell) {
 
 /** the kernel to insert points into the grid */
 __global__ void sort_points_k
-(point_list_t **grid, int ncells, const fvec3 * __restrict__ ps, int n) {
+(point_list_t **grid, int ncells, const fvec3 * __restrict__ ps,
+ point_list_t *pre_chains, int n) {
 	int ip = threadIdx.x + blockIdx.x * blockDim.x;
 	if(ip >= n)
 		return;
-	insert_point(grid, ncells, ps, ip);
+
+	// allocate memory for list element
+	point_list_t *plist;
+	if(pre_chains)
+		plist = pre_chains + ip;
+	else
+		plist = (point_list_t *)hamalloc(sizeof(point_list_t));
+	if(!plist) {
+		printf("cannot allocate memory\n");
+		return;
+	}
+
+	insert_point(grid, ncells, ps, ip, plist);
 }  // sort_points_k
 
 /** the kernel to free the entire grid; this is 1d kernel */
-__global__ void free_grid_k(point_list_t **grid, int ncells) {
+__global__ void free_grid_k
+(point_list_t **grid, int ncells, point_list_t *pre_chains) {
 	int ncells3 = ncells * ncells * ncells;
 	int i = threadIdx.x + blockIdx.x * blockDim.x;
 	if(i >= ncells3)
@@ -141,11 +153,11 @@ __global__ void free_grid_k(point_list_t **grid, int ncells) {
 	cell.x = i % ncells;
 	cell.y = i % (ncells * ncells) / ncells;
 	cell.z = i / (ncells * ncells);
-	free_cell(grid, ncells, cell);
+	free_cell(grid, ncells, cell, pre_chains);
 }  // free_grid_k
 
 // a test to fill in the grid and then free it
-void grid_test(int n, int ncells, bool print) {
+void grid_test(int n, int ncells, bool alloc, bool print) {
 	// points
 	size_t sz = n * sizeof(fvec3);
 	fvec3 *ps, *d_ps;
@@ -164,17 +176,24 @@ void grid_test(int n, int ncells, bool print) {
 	point_list_t **d_grid;
 	cucheck(cudaMalloc((void **)&d_grid, grid_sz));
 	cucheck(cudaMemset(d_grid, 0, grid_sz));
+	
+	// pre-allocated per-point chains
+	point_list_t *pre_chains = 0;
+	if(!alloc) {
+		cucheck(cudaMalloc((void **)&pre_chains, n * sizeof(point_list_t)));
+		cucheck(cudaMemset(pre_chains, 0, n * sizeof(point_list_t)));
+	}
 
 	// fill the grid
 	double t1 = omp_get_wtime();
 	int bs = 256;
-	sort_points_k<<<divup(n, bs), bs>>>(d_grid, ncells, d_ps, n);
+	sort_points_k<<<divup(n, bs), bs>>>(d_grid, ncells, d_ps, pre_chains, n);
 	cucheck(cudaGetLastError());
 	cucheck(cudaStreamSynchronize(0));
 	double t2 = omp_get_wtime();
 
 	// free the grid
-	free_grid_k<<<divup(ncells3, bs), bs>>>(d_grid, ncells);
+	free_grid_k<<<divup(ncells3, bs), bs>>>(d_grid, ncells, pre_chains);
 	cucheck(cudaGetLastError());
 	cucheck(cudaStreamSynchronize(0));
 	double t3 = omp_get_wtime();
@@ -183,6 +202,7 @@ void grid_test(int n, int ncells, bool print) {
 	//free(ps);
 	cucheck(cudaFree(d_grid));
 	cucheck(cudaFree(d_ps));
+	cucheck(cudaFree(pre_chains));
 
 	// print time
 	if(print) {
@@ -196,10 +216,12 @@ void grid_test(int n, int ncells, bool print) {
 
 int main(int argc, char **argv) {
 	srandom((int)time(0));
-	ha_init(halloc_opts_t(256 * 1024 * 1024));
+	size_t memory = 256 * 1024 * 1024;
+	bool alloc = true;
+	ha_init(halloc_opts_t(memory));
 	// warm-up run
-	grid_test(10000, 8, false);
+	grid_test(10000, 8, alloc, false);
 	// main run
-	grid_test(4000000, 32, true);
+	grid_test(4000000, 32, alloc, true);
 	ha_shutdown();
 }  // main

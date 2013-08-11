@@ -21,3 +21,6 @@ run: $(TGT)
 
 clean:
 	rm -f $(TMP)
+
+$(LIBHALLOC):
+	make -C ../..
