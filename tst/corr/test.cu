@@ -249,7 +249,7 @@ void run_test5(void) {
 }  // run_test5
 
 int main(int argc, char **argv) {
-	ha_init(MEMORY);
+	ha_init(halloc_opts_t(MEMORY));
 	run_test0();
 	run_test1();
 	run_test2();

@@ -196,7 +196,7 @@ void grid_test(int n, int ncells, bool print) {
 
 int main(int argc, char **argv) {
 	srandom((int)time(0));
-	ha_init(256 * 1024 * 1024);
+	ha_init(halloc_opts_t(256 * 1024 * 1024));
 	// warm-up run
 	grid_test(10000, 8, false);
 	// main run

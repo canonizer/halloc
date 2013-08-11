@@ -28,8 +28,6 @@
 #define THREAD_FREQ 11
 /** allocation counter increment */
 #define COUNTER_INC 1
-/** maximum amount of memory to allocate, in MB */
-#define MAX_ALLOC_MEM 512
 
 /** allocation counters */
 __device__ uint counters_g[NCOUNTERS];
@@ -164,7 +162,7 @@ __device__ void hafree(void *p) {
 		hafree_large(p);
 }  // hafree
 
-void ha_init(size_t memory) {
+void ha_init(halloc_opts_t opts) {
 	// TODO: initialize all devices
 	// get total device memory (in bytes) & total number of superblocks
 	uint64 dev_memory;
@@ -173,18 +171,22 @@ void ha_init(size_t memory) {
 	cucheck(cudaGetDevice(&dev));
 	cucheck(cudaGetDeviceProperties(&dev_prop, dev));
 	dev_memory = dev_prop.totalGlobalMem;
-	uint nsbs = dev_memory / SB_SZ, sb_sz = SB_SZ;
+	uint sb_sz = 1 << opts.sb_sz_sh;
+	uint nsbs = dev_memory / sb_sz;
 	cuset(nsbs_g, uint, nsbs);
 	cuset(sb_sz_g, uint, sb_sz);
-	cuset(sb_sz_sh_g, uint, SB_SZ_SH);
+	cuset(sb_sz_sh_g, uint, opts.sb_sz_sh);
+
+	// limit memory available to 3/4 of device memory
+	opts.memory = min((uint64)opts.memory, 3ull * dev_memory / 4ull);
 
 	// split memory between halloc and CUDA allocator
-	uint64 halloc_memory = 0.75 * memory;
-	uint64 cuda_memory = memory - halloc_memory;
+	uint64 halloc_memory = opts.halloc_fraction * opts.memory;
+	uint64 cuda_memory = opts.memory - halloc_memory;
 	cucheck(cudaDeviceSetLimit(cudaLimitMallocHeapSize, cuda_memory));
 
 	// allocate a fixed number of superblocks, copy them to device
-	uint nsbs_alloc = (uint)min((uint64)nsbs, (uint64)memory / sb_sz);
+	uint nsbs_alloc = (uint)min((uint64)nsbs, (uint64)opts.memory / sb_sz);
 	size_t sbs_sz = MAX_NSBS * sizeof(superblock_t);
 	superblock_t *sbs = (superblock_t *)malloc(sbs_sz);
 	memset(sbs, 0, MAX_NSBS * sizeof(superblock_t));
@@ -197,7 +199,7 @@ void ha_init(size_t memory) {
 		//sbs[isb].chunk_id = SZ_NONE;
 		//sbs[isb].state = SB_FREE;
 		//sbs[isb].mutex = 0;
-		cucheck(cudaMalloc(&sbs[isb].ptr, SB_SZ));
+		cucheck(cudaMalloc(&sbs[isb].ptr, sb_sz));
 		base_addr = (char *)min((uint64)base_addr, (uint64)sbs[isb].ptr);
 	}
 	//cuset_arr(sbs_g, (superblock_t (*)[MAX_NSBS])&sbs);
@@ -211,7 +213,7 @@ void ha_init(size_t memory) {
 		free_sbs[iword] |= 1 << ibit;
 	}
 	cuset_arr(free_sbs_g, &free_sbs);
-	base_addr = (char *)((uint64)base_addr / SB_SZ * SB_SZ);
+	base_addr = (char *)((uint64)base_addr / sb_sz * sb_sz);
 	if((uint64)base_addr < dev_memory)
 		base_addr = 0;
 	else
@@ -220,10 +222,10 @@ void ha_init(size_t memory) {
 
 	// allocate block bits and zero them out
 	void *bit_blocks, *alloc_sizes;
-	uint nsb_bit_words = SB_SZ / (BLOCK_STEP * WORD_SZ), 
-		nsb_alloc_words = SB_SZ / (BLOCK_STEP * 4);
+	uint nsb_bit_words = sb_sz / (BLOCK_STEP * WORD_SZ),
+		nsb_alloc_words = sb_sz / (BLOCK_STEP * 4);
 	// TODO: make move numbers into constants
-	uint nsb_bit_words_sh = SB_SZ_SH - (4 + 5);
+	uint nsb_bit_words_sh = opts.sb_sz_sh - (4 + 5);
 	cuset(nsb_bit_words_g, uint, nsb_bit_words);
 	cuset(nsb_bit_words_sh_g, uint, nsb_bit_words_sh);
 	cuset(nsb_alloc_words_g, uint, nsb_alloc_words);
@@ -250,8 +252,8 @@ void ha_init(size_t memory) {
 		size_info->hash_step = 
 		 	max_prime_below(size_info->nblocks / 256 + size_info->nblocks / 64);
 		//size_info->hash_step = size_info->nblocks / 256 + size_info->nblocks / 64 + 1;
-		size_info->roomy_threshold = 0.25 * size_info->nblocks;
-		size_info->busy_threshold = 0.8 * size_info->nblocks;
+		size_info->roomy_threshold = opts.roomy_fraction * size_info->nblocks;
+		size_info->busy_threshold = opts.busy_fraction * size_info->nblocks;
 	}  // for(each size)
 	cuset_arr(size_infos_g, &size_infos);
 
