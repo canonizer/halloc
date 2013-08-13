@@ -36,6 +36,8 @@ typedef struct {
 /** default superblock size, in bytes */
 #define SB_SZ_SH (10 + 10 + 3)
 #define SB_SZ (1 << SB_SZ_SH)
+/** number of heads between which to distribute allocations */
+#define NHEADS 1
 
 /** positions and sizes related to slab counters */
 #define SB_SIZE_POS 0

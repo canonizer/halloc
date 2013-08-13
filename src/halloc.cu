@@ -51,9 +51,12 @@ __device__ inline uint size_id_from_nbytes(uint nbytes) {
 
 /** procedure for small allocation */
 __device__ void *hamalloc_small(uint nbytes) {
+	// the head; having multiple heads actually doesn't help
+	//uint ihead = blockIdx.x % NHEADS;
+	uint ihead = 0;
 	// ignore zero-sized allocations
 	uint size_id = size_id_from_nbytes(nbytes);
-	uint head_sb = head_sbs_g[size_id];
+	uint head_sb = head_sbs_g[ihead][size_id];
 	size_info_t size_info = size_infos_g[size_id];
 	// the counter is based on block id
 	uint tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -82,7 +85,7 @@ __device__ void *hamalloc_small(uint nbytes) {
 		if(want_alloc) {
 			// try allocating in head superblock
 			//head_sb = head_sbs_g[size_id];
-			p = sb_alloc_in(head_sb, iblock, size_info, size_id);
+			p = sb_alloc_in(ihead, head_sb, iblock, size_info, size_id);
 			bool need_roomy_sb = want_alloc = !p;
 			while(__any(need_roomy_sb)) {
 				uint need_roomy_mask = __ballot(need_roomy_sb);
@@ -92,7 +95,7 @@ __device__ void *hamalloc_small(uint nbytes) {
 					// here try to check whether a new SB is really needed, and get the
 					// new SB
 					if(lid == leader_lid)
-						head_sb = new_sb_for_size(size_id);
+						head_sb = new_sb_for_size(size_id, ihead);
 					if(size_id == leader_size_id) {
 						head_sb = __shfl((int)head_sb, leader_lid);
 						want_alloc = head_sb != SB_NONE;
