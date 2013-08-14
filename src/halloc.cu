@@ -27,7 +27,7 @@
 /** thread frequency for initial hashing */
 #define THREAD_FREQ 11
 /** allocation counter increment */
-#define COUNTER_INC 1
+#define COUNTER_INC 4
 
 /** allocation counters */
 __device__ uint counters_g[NCOUNTERS];
@@ -52,11 +52,12 @@ __device__ inline uint size_id_from_nbytes(uint nbytes) {
 /** procedure for small allocation */
 __device__ void *hamalloc_small(uint nbytes) {
 	// the head; having multiple heads actually doesn't help
-	//uint ihead = blockIdx.x % NHEADS;
-	uint ihead = 0;
+	uint ihead = (blockIdx.x / 32) % NHEADS;
+	//uint ihead = 0;
 	// ignore zero-sized allocations
 	uint size_id = size_id_from_nbytes(nbytes);
 	uint head_sb = head_sbs_g[ihead][size_id];
+	//uint head_sb = *(volatile uint *)&head_sbs_g[ihead][size_id];
 	size_info_t size_info = size_infos_g[size_id];
 	// the counter is based on block id
 	uint tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -274,6 +275,7 @@ void ha_init(halloc_opts_t opts) {
 	cuvar_memset(roomy_sbs_g, 0, sizeof(roomy_sbs_g));
 	//cuvar_memset(roomy_sbs_g, 0, (MAX_NSIZES * SB_SET_SZ * sizeof(uint)));
 	cuvar_memset(head_sbs_g, ~0, sizeof(head_sbs_g));
+	cuvar_memset(cached_sbs_g, ~0, sizeof(head_sbs_g));
 	cuvar_memset(head_locks_g, 0, sizeof(head_locks_g));
 	cuvar_memset(counters_g, 1, sizeof(counters_g));
 	//fprintf(stderr, "finished cuda-memsetting\n");

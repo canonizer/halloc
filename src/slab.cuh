@@ -25,6 +25,8 @@ __device__ sbset_t roomy_sbs_g[MAX_NSIZES];
 
 /** head superblocks for each size */
 __device__ uint head_sbs_g[NHEADS][MAX_NSIZES];
+/** cached head SB's for each size */
+__device__ volatile uint cached_sbs_g[NHEADS][MAX_NSIZES];
 /** superblock operation locks per size */
 __device__ uint head_locks_g[NHEADS][MAX_NSIZES];
 
@@ -138,6 +140,46 @@ __device__ __forceinline__ void sb_ctr_dec
 	}  // while(any one wants to deallocate)
 }  // sb_ctr_dec
 
+/** finds a suitable new slab for size and just returns it, without modifying
+		any of the underlying size data structures */
+__device__ inline uint find_sb_for_size(uint size_id) {
+	uint new_head = SB_NONE;
+	// replacement really necessary; first try among roomy sb's of current 
+	// size
+	while((new_head = sbset_get_from(roomy_sbs_g[size_id]))
+				!= SB_NONE) {
+		// try set head
+		uint old_counter = atomicOr(&sb_counters_g[new_head], 1 << SB_HEAD_POS);
+		if(sb_is_head(old_counter)) { 
+		} else if(sb_size_id(old_counter) != size_id 
+							|| sb_count(old_counter)	> size_infos_g[size_id].roomy_threshold) {
+			// drop the block and go for another
+			// TODO: process this as another head detachment
+			atomicAnd(&sb_counters_g[new_head], ~(1 << SB_HEAD_POS));
+		} else
+			break;
+	}  // while(searching through new heads)
+
+	if(new_head == SB_NONE) {
+		// try getting from free superblocks; hear actually getting one 
+		// always means success, as only truly free block get to this bit array
+		new_head = sbset_get_from(free_sbs_g);
+		if(new_head != SB_NONE) {
+			// fill in the slab
+			*(volatile uint *)&sbs_g[new_head].size_id = size_id;
+			uint old_counter = sb_counter_val(0, false, SZ_NONE, SZ_NONE);
+			uint new_counter = sb_counter_val(0, true, SZ_NONE, size_id);
+			// there may be others trying to set the head; as they come from
+			// roomy blocks, they will fail; also, there may be some ongoing
+			// allocation attempts, so just wait
+			while(atomicCAS(&sb_counters_g[new_head], old_counter, new_counter) !=
+						old_counter);
+			//atomicCAS(&sb_counters_g[new_head], old_counter, new_counter);
+		}  // if(got new head from free slabs)
+	}  // if(didn't get new head from roomy slabs)
+	return new_head;
+}  // find_sb_for_size
+
 /** tries to find a new superblock for the given size
 		@returns the new head superblock id if found, and SB_NONE if none
 		@remarks this function should be called by at most 1 thread in a warp at a time
@@ -155,39 +197,13 @@ __device__ inline uint new_sb_for_size(uint size_id, uint ihead) {
 		if(cur_head == SB_NONE || 
 			 sb_count(*(volatile uint *)&sb_counters_g[cur_head]) >=
 			 size_infos_g[size_id].busy_threshold) {
-			// replacement really necessary; first try among roomy sb's of current 
-			// size
-			while((new_head = sbset_get_from(roomy_sbs_g[size_id]))
-						!= SB_NONE) {
-				// try set head
-				uint old_counter = atomicOr(&sb_counters_g[new_head], 1 << SB_HEAD_POS);
-				if(sb_is_head(old_counter)) { 
-				} else if(sb_size_id(old_counter) != size_id 
-									|| sb_count(old_counter)	> size_infos_g[size_id].roomy_threshold) {
-					// drop the block and go for another
-					// TODO: process this as another head detachment
-					atomicAnd(&sb_counters_g[new_head], ~(1 << SB_HEAD_POS));
-				} else
-					break;
-			}  // while(searching through new heads)
+			
+			new_head = cached_sbs_g[ihead][size_id];
+			cached_sbs_g[ihead][size_id] = SB_NONE;
+			// this can happen, e.g., on start
+			if(new_head == SB_NONE)
+				new_head = find_sb_for_size(size_id);
 
-			if(new_head == SB_NONE) {
-				// try getting from free superblocks; hear actually getting one 
-				// always means success, as only truly free block get to this bit array
-				new_head = sbset_get_from(free_sbs_g);
-				if(new_head != SB_NONE) {
-					// fill in the slab
-					*(volatile uint *)&sbs_g[new_head].size_id = size_id;
-					uint old_counter = sb_counter_val(0, false, SZ_NONE, SZ_NONE);
-					uint new_counter = sb_counter_val(0, true, SZ_NONE, size_id);
-					// there may be others trying to set the head; as they come from
-					// roomy blocks, they will fail; also, there may be some ongoing
-					// allocation attempts, so just wait
-					while(atomicCAS(&sb_counters_g[new_head], old_counter, new_counter) !=
-								old_counter);
-					//atomicCAS(&sb_counters_g[new_head], old_counter, new_counter);
-				}  // if(got new head from free slabs)
-			}  // if(didn't get new head from roomy slabs)
 			if(new_head != SB_NONE) {
 				// set the new head, so that allocations can continue
 				head_sbs_g[ihead][size_id] = new_head;
@@ -205,9 +221,12 @@ __device__ inline uint new_sb_for_size(uint size_id, uint ihead) {
 						sbset_add_to(roomy_sbs_g[size_id], cur_head);
 					} 
 				}  // if(there's a head to detach)
+				// cache a new head slab
+				cached_sbs_g[ihead][size_id] = find_sb_for_size(size_id);
+				__threadfence();
 			}  // if(found new head)
 		} else {
-			// just re-read the new head superblock
+			// looks like we read stale data at some point, just re-read head
 			new_head = *(volatile uint *)&head_sbs_g[ihead][size_id];
 		}
 		unlock(&head_locks_g[ihead][size_id]);
@@ -240,7 +259,8 @@ __device__ __forceinline__ void *sb_alloc_in
 	uint *block_bits = sb_block_bits(isb);
 	superblock_t sb = sbs_g[isb];
 	// check the superblock occupancy counter
-	uint sb_counter = sb_counters_g[isb];
+	//uint sb_counter = sb_counters_g[isb];
+	uint sb_counter = *(volatile uint *)&sb_counters_g[isb];
 	if(sb_count(sb_counter) >= size_info.busy_threshold) {
 		uint count = sb_count(*(volatile uint *)&sb_counters_g[isb]);
 		//uint count = sb_count(sb_counter);

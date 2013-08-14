@@ -33,9 +33,6 @@ typedef struct {
 #define MAX_NTRIES 256
 /** a "no-sb" constant */
 #define SB_NONE (~0)
-/** default superblock size, in bytes */
-#define SB_SZ_SH (10 + 10 + 3)
-#define SB_SZ (1 << SB_SZ_SH)
 /** number of heads between which to distribute allocations */
 #define NHEADS 1
 
