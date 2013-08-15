@@ -39,8 +39,8 @@ struct CommonOpts {
 	/** default initialization for common options */
 	CommonOpts() 
 		: allocator(AllocatorHalloc), memory(512 * 1024 * 1024), 
-			halloc_fraction(0.75), busy_fraction(0.8), roomy_fraction(0.25),
-			sparse_fraction(0.05), sb_sz_sh(23), nthreads(1024 * 1024), ntries(4), 
+			halloc_fraction(0.75), busy_fraction(0.82), roomy_fraction(0.25),
+			sparse_fraction(0.05), sb_sz_sh(22), nthreads(1024 * 1024), ntries(4), 
 			alloc_sz(16), nallocs(4), alloc_fraction(0.4), bs(256)	{}
 	/** parses the options from command line, with the defaults specified; memory
 		is also capped to fraction of device-available at this step 

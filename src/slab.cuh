@@ -159,7 +159,6 @@ __device__ inline uint find_sb_for_size(uint size_id) {
 		} else
 			break;
 	}  // while(searching through new heads)
-
 	if(new_head == SB_NONE) {
 		// try getting from free superblocks; hear actually getting one 
 		// always means success, as only truly free block get to this bit array
@@ -284,6 +283,7 @@ __device__ __forceinline__ void *sb_alloc_in
 			break;
 		} else {
 			iblock = (iblock + size_info.hash_step) % size_info.nblocks;
+			//iblock = (iblock + size_info.hash_step) & (size_info.nblocks - 1);
 		}
 	}
 	if(reserved) {

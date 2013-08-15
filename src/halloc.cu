@@ -68,6 +68,7 @@ __device__ void *hamalloc_small(uint nbytes) {
 	if(lid == leader_lid)
 		cv = atomicAdd(&counters_g[icounter], COUNTER_INC);
 	cv = __shfl((int)cv, leader_lid);
+
 	void *p = 0;
 	// initial position
 	// TODO: use a real but cheap random number generator
@@ -76,9 +77,9 @@ __device__ void *hamalloc_small(uint nbytes) {
 	// (icounter * WARP_SZ + lid) also provides good initial value qualities
 	// using xor instead of multiplication can provide even higher entropy
 	//uint cv2 = cv >> 3, cv1 = cv & 7;
-	uint iblock = (tid * THREAD_FREQ + 
-							 ((cv * cv) * (cv + 1))) % size_info.nblocks;
-	//uint iblock = (tid * THREAD_FREQ + cv * cv * (cv + 1)) & (size_info.nblocks - 1);
+	//uint iblock = (tid * THREAD_FREQ + 
+	//							 cv * cv * (cv + 1)) % size_info.nblocks;
+	uint iblock = (tid * THREAD_FREQ + cv * cv * (cv + 1)) & (size_info.nblocks - 1);
 	// main allocation loop
 	bool want_alloc = true;
 	// use two-level loop to avoid warplocks
@@ -131,12 +132,16 @@ __device__ void hafree_small(void *p, uint sb_id) {
 	//uint ichunk = (uint)((char *)p - (char *)sbs_g[sb_id].ptr) / BLOCK_STEP;
 	//uint size_id = sb_get_reset_alloc_size(alloc_sizes, ichunk);
 	uint size_id = sbs_g[sb_id].size_id;
+	// TODO: ensure that no L1 caching takes place
+	//uint size_id = sb_size_id(sb_counters_g[sb_id]);
 	uint *block_bits = sb_block_bits(sb_id);
 	// free the memory
 	// TODO: this division is what eats all performance
 	// replace it with reciprocal multiplication
 	uint iblock = (uint)((char *)p - (char *)sbs_g[sb_id].ptr) /
 			size_infos_g[size_id].block_sz;
+	//uint iblock = (uint)((char *)p - (char *)sbs_g[sb_id].ptr) / 16;
+	//			size_infos_g[size_id].block_sz;
 	uint iword = iblock / WORD_SZ, ibit = iblock % WORD_SZ;
 	//uint new_word = atomicAnd(block_bits + iword, ~(1 << ibit)) & ~(1 << ibit);
 	atomicAnd(block_bits + iword, ~(1 << ibit));
@@ -190,7 +195,7 @@ void ha_init(halloc_opts_t opts) {
 	cucheck(cudaDeviceSetLimit(cudaLimitMallocHeapSize, cuda_memory));
 
 	// allocate a fixed number of superblocks, copy them to device
-	uint nsbs_alloc = (uint)min((uint64)nsbs, (uint64)opts.memory / sb_sz);
+	uint nsbs_alloc = (uint)min((uint64)nsbs, (uint64)halloc_memory / sb_sz);
 	size_t sbs_sz = MAX_NSBS * sizeof(superblock_t);
 	superblock_t *sbs = (superblock_t *)malloc(sbs_sz);
 	memset(sbs, 0, MAX_NSBS * sizeof(superblock_t));
