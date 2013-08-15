@@ -41,7 +41,7 @@ struct CommonOpts {
 		: allocator(AllocatorHalloc), memory(512 * 1024 * 1024), 
 			halloc_fraction(0.75), busy_fraction(0.82), roomy_fraction(0.25),
 			sparse_fraction(0.05), sb_sz_sh(22), nthreads(1024 * 1024), ntries(4), 
-			alloc_sz(16), nallocs(4), alloc_fraction(0.4), bs(256)	{}
+			alloc_sz(16), nallocs(4), alloc_fraction(0.4), bs(256), period_mask(0) {}
 	/** parses the options from command line, with the defaults specified; memory
 		is also capped to fraction of device-available at this step 
 		@param [in, out] this the default options on the input, and the options
@@ -79,6 +79,13 @@ struct CommonOpts {
 	int nallocs;
 	/** fraction of memory to allocate in test, -f */
 	double alloc_fraction;
+	/** period mask, indicates one of how many threads actually does allocation;
+	-p specifies period shift
+	*/
+	int period_mask;
+	/** gets the total number of allocations, as usually defined for tests;
+			individual tests may use their own definition */
+	double total_nallocs(void);
 };
 
 #include "halloc-wrapper.h"

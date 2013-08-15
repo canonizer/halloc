@@ -77,9 +77,9 @@ __device__ void *hamalloc_small(uint nbytes) {
 	// (icounter * WARP_SZ + lid) also provides good initial value qualities
 	// using xor instead of multiplication can provide even higher entropy
 	//uint cv2 = cv >> 3, cv1 = cv & 7;
-	//uint iblock = (tid * THREAD_FREQ + 
-	//							 cv * cv * (cv + 1)) % size_info.nblocks;
-	uint iblock = (tid * THREAD_FREQ + cv * cv * (cv + 1)) & (size_info.nblocks - 1);
+	uint iblock = (tid * THREAD_FREQ + 
+								 cv * cv * (cv + 1)) % size_info.nblocks;
+	//uint iblock = (tid * THREAD_FREQ + cv * cv * (cv + 1)) & (size_info.nblocks - 1);
 	// main allocation loop
 	bool want_alloc = true;
 	// use two-level loop to avoid warplocks

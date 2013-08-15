@@ -15,7 +15,7 @@ template<class T>
 __global__ void latency_malloc_k
 (CommonOpts opts, void **ptrs, double *latencies) {
 	int n = opts.nthreads, i = threadIdx.x + blockIdx.x * blockDim.x;
-	if(i >= n)
+	if(i >= n || i & opts.period_mask)
 		return;
 	uint64 t1 = clock64();
 	for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) 
@@ -30,7 +30,7 @@ template<class T>
 __global__ void latency_free_k
 (CommonOpts opts, void **ptrs, double *latencies) {
 	int n = opts.nthreads, i = threadIdx.x + blockIdx.x * blockDim.x;
-	if(i >= n)
+	if(i >= n || i & opts.period_mask)
 		return;
 	uint64 t1 = clock64();
 	for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) 
@@ -80,8 +80,8 @@ public:
 			malloc_latency += h_malloc_latencies[i];
 			free_latency += h_free_latencies[i];
 		}
-		malloc_latency /= (double)n * opts.nallocs * opts.ntries;
-		free_latency /= (double)n * opts.nallocs * opts.ntries;
+		malloc_latency /= opts.total_nallocs();
+		free_latency /= opts.total_nallocs();
 		printf("avg malloc latency %lf cycles\n", malloc_latency);
 		printf("avg free latency %lf cycles\n", free_latency);
 		printf("avg pair latency %lf cycles\n", malloc_latency + free_latency);

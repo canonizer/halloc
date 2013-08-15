@@ -64,10 +64,10 @@ AllocatorType parse_allocator(char *str) {
 	return (AllocatorType)istr;
 }  // parse_allocator
 
-const char *common_opts_str_g = ":ha:m:C:B:R:S:b:n:t:s:l:f:";
-
 void CommonOpts::parse_cmdline(int argc, char **argv) {
+	static const char *common_opts_str_g = ":ha:m:C:B:R:S:b:n:t:s:l:f:p:";
 	int c;
+	int period_sh;
 	while((c = getopt(argc, argv, common_opts_str_g)) != -1) {
 		switch(c) {
 			// general options (and errors)
@@ -122,6 +122,10 @@ void CommonOpts::parse_cmdline(int argc, char **argv) {
 		case 'f':
 			alloc_fraction = parse_double(optarg);
 			break;
+		case 'p':
+			period_sh = parse_int(optarg, 0, 31);
+			period_mask = period_sh > 0 ? ((1 << period_sh) - 1) : 0;
+			break;
 
 		default:
 			fprintf(stderr, "this simply should not happen when parsing options\n");
@@ -143,3 +147,8 @@ void CommonOpts::parse_cmdline(int argc, char **argv) {
 	if(allocator == AllocatorCuda)
 		nthreads = min(nthreads, 128 * 1024);
 }  // parse_cmdline
+
+double CommonOpts::total_nallocs(void) {
+	int period = period_mask + 1;
+	return (double)nthreads * ntries * nallocs / period;
+}
