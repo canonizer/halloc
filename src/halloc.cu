@@ -35,7 +35,7 @@ __device__ uint counters_g[NCOUNTERS];
 /** gets size id from size in bytes */
 __device__ inline uint size_id_from_nbytes(uint nbytes) {
 	nbytes = max(nbytes, MIN_BLOCK_SZ);
-	uint iunit = __ffs(nbytes) - 5, unit = 1 << (iunit + 3);
+	uint iunit = (32 - __clz(nbytes)) - 5, unit = 1 << (iunit + 3);
 	// update unit if it is too small
 	if(nbytes > 3 * unit) {
 		iunit += 1;
@@ -129,7 +129,7 @@ __device__ void *hamalloc(uint nbytes) {
 /** procedure for small free*/
 __device__ void hafree_small(void *p, uint sb_id) {
 	//uint *alloc_sizes = sb_alloc_sizes(sb_id);
-	//uint ichunk = (uint)((char *)p - (char *)sbs_g[sb_id].ptr) / BLOCK_STEP;
+	//uint ichunk = (uint)((char *)p - (char *)sbs_g[sb_id].ptr) / 16;
 	//uint size_id = sb_get_reset_alloc_size(alloc_sizes, ichunk);
 	uint size_id = sbs_g[sb_id].size_id;
 	// TODO: ensure that no L1 caching takes place
@@ -139,7 +139,7 @@ __device__ void hafree_small(void *p, uint sb_id) {
 	// TODO: this division is what eats all performance
 	// replace it with reciprocal multiplication
 	uint iblock = (uint)((char *)p - (char *)sbs_g[sb_id].ptr) /
-			size_infos_g[size_id].block_sz;
+		size_infos_g[size_id].block_sz;
 	//uint iblock = (uint)((char *)p - (char *)sbs_g[sb_id].ptr) / 16;
 	//			size_infos_g[size_id].block_sz;
 	uint iword = iblock / WORD_SZ, ibit = iblock % WORD_SZ;

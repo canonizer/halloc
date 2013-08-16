@@ -115,10 +115,13 @@ void warm_up(void) {
 template <class T, template<class Ta> class Test>
 void run_test(CommonOpts &opts) {
 	T::init(opts);
-	warm_up<T>();
+	//warm_up<T>();
 	
 	Test<T> test;
-	test(opts);
+	// warmup
+	test(opts, true);
+	// real run
+	test(opts, false);
 
 	T::shutdown();
 }  // run_test

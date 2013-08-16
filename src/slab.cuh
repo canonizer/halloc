@@ -50,16 +50,16 @@ __device__ inline uint *sb_alloc_sizes(uint sb) {
  */
 __device__ inline void sb_set_alloc_size(uint *alloc_words, uint ichunk, uint
 		size_id) {
-	uint iword = ichunk / 4, ibyte = ichunk % 4, shift = ibyte * 8;
-	uint mask = (size_id << shift) | (~0 ^ (0xffu << shift));
+	uint iword = ichunk / 8, ibyte = ichunk % 8, shift = ibyte * 4;
+	uint mask = (size_id << shift) | (~0 ^ (0xfu << shift));
 	atomicAnd(&alloc_words[iword], mask);
 }  // sb_set_alloc_size
 
 /** gets (and resets) allocation size for the allocation */
 __device__ inline uint sb_get_reset_alloc_size(uint *alloc_words, uint ichunk) {
-	uint iword = ichunk / 4, ibyte = ichunk % 4, shift = ibyte * 8;
-	uint mask = 0xffu << shift;
-	return (atomicOr(&alloc_words[iword], mask) >> shift) & 0xffu;
+	uint iword = ichunk / 8, ibyte = ichunk % 8, shift = ibyte * 4;
+	uint mask = 0xfu << shift;
+	return (atomicOr(&alloc_words[iword], mask) >> shift) & 0xfu;
 }  // sb_get_reset_alloc_size
 
 /** tries to mark a slab as free 
@@ -237,7 +237,8 @@ __device__ inline uint new_sb_for_size(uint size_id, uint ihead) {
 		// someone else working on current head superblock; 
 		while(true) {
 			if(*(volatile uint *)&head_sbs_g[ihead][size_id] != cur_head ||
-				 *(volatile uint *)&head_locks_g[ihead][size_id] == 0)
+							 *(volatile uint *)&head_locks_g[ihead][size_id] == 0)
+				//if(*(volatile uint *)&head_locks_g[ihead][size_id] == 0);
 				break;
 		}
 		return *(volatile uint *)&head_sbs_g[ihead][size_id];
@@ -299,7 +300,7 @@ __device__ __forceinline__ void *sb_alloc_in
 		p = (char *)sb.ptr + iblock * size_info.block_sz;
 		// write allocation size
 		// TODO: support chunks of other size
-		//uint *alloc_sizes = sb_alloc_sizes(isb);
+		uint *alloc_sizes = sb_alloc_sizes(isb);
 		//sb_set_alloc_size(alloc_sizes, iblock, size_id);
 		//sb_ctr_inc(~0, isb, size_info.block_sz / BLOCK_STEP);
 	}

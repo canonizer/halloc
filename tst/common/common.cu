@@ -145,7 +145,7 @@ void CommonOpts::parse_cmdline(int argc, char **argv) {
 
 	// cap number of threads for CUDA allocator
 	if(allocator == AllocatorCuda)
-		nthreads = min(nthreads, 128 * 1024);
+		nthreads = min(nthreads, 32 * 1024);
 }  // parse_cmdline
 
 double CommonOpts::total_nallocs(void) {
