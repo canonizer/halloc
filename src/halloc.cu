@@ -56,8 +56,8 @@ __device__ void *hamalloc_small(uint nbytes) {
 	//uint ihead = 0;
 	// ignore zero-sized allocations
 	uint size_id = size_id_from_nbytes(nbytes);
-	uint head_sb = head_sbs_g[ihead][size_id];
-	//uint head_sb = *(volatile uint *)&head_sbs_g[ihead][size_id];
+	//uint head_sb = head_sbs_g[ihead][size_id];
+	uint head_sb = *(volatile uint *)&head_sbs_g[ihead][size_id];
 	size_info_t size_info = size_infos_g[size_id];
 	// the counter is based on block id
 	uint tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -81,14 +81,17 @@ __device__ void *hamalloc_small(uint nbytes) {
 								 cv * cv * (cv + 1)) % size_info.nblocks;
 	//uint iblock = (tid * THREAD_FREQ + cv * cv * (cv + 1)) & (size_info.nblocks - 1);
 	// main allocation loop
-	bool want_alloc = true;
+	bool want_alloc = true, need_roomy_sb = false;
 	// use two-level loop to avoid warplocks
 	do {
 		if(want_alloc) {
 			// try allocating in head superblock
 			//head_sb = head_sbs_g[size_id];
-			p = sb_alloc_in(ihead, head_sb, iblock, size_info, size_id);
-			bool need_roomy_sb = want_alloc = !p;
+			p = sb_alloc_in(ihead, head_sb, iblock, size_info, size_id, 
+											need_roomy_sb);
+			//want_alloc = need_roomy_sb;
+			//bool need_roomy_sb = want_alloc = !p;
+			want_alloc = !p;
 			while(__any(need_roomy_sb)) {
 				uint need_roomy_mask = __ballot(need_roomy_sb);
 				if(need_roomy_sb) {
@@ -100,7 +103,7 @@ __device__ void *hamalloc_small(uint nbytes) {
 						head_sb = new_sb_for_size(size_id, ihead);
 					if(size_id == leader_size_id) {
 						head_sb = __shfl((int)head_sb, leader_lid);
-						want_alloc = head_sb != SB_NONE;
+						want_alloc = want_alloc && head_sb != SB_NONE;
 						need_roomy_sb = false;
 					}
 				}

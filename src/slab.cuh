@@ -84,10 +84,14 @@ __device__ inline void sb_try_mark_free(uint sb, uint size_id, bool from_head) {
 
 /** increment the non-distributed counter of the superblock 
 		size_id is just ignored, allocation size is expressed in chunks
-		@returns old counter value
+		@returns a mask which indicates
+		bit 0 = whether allocation succeeded (0 = allocation failed due to block
+		being freed)
+		bit 1 = whether size_id threshold have been crossed 
  */
-__device__ __forceinline__ bool sb_ctr_inc
+__device__ __forceinline__ uint sb_ctr_inc
 (uint size_id, uint sb_id, uint alloc_sz) {
+	uint return_mask = 1;
 	bool want_inc = true;
 	uint mask, old_counter, lid = threadIdx.x % WARP_SZ;
 	while(mask = __ballot(want_inc)) {
@@ -98,12 +102,20 @@ __device__ __forceinline__ bool sb_ctr_inc
 		uint change = __popc(__ballot(sb_id == leader_sb_id));
 		if(lid == leader_lid)
 			old_counter = sb_counter_inc(&sb_counters_g[sb_id], change);
-		if(leader_sb_id == sb_id)
+		if(leader_sb_id == sb_id) {
 			old_counter = __shfl((int)old_counter, leader_lid);
+			if(sb_size_id(old_counter) != size_id)
+				return_mask &= ~1;
+			uint old_count = sb_count(old_counter);
+			uint threshold = size_infos_g[size_id].busy_threshold;
+			if(old_count < threshold && old_count + change >= threshold)
+				return_mask |= 2;
+		}
 		want_inc = want_inc && sb_id != leader_sb_id;
 	}  // while
 	//return true;
-	return sb_size_id(old_counter) == size_id;
+	//return sb_size_id(old_counter) == size_id;
+	return return_mask;
 }  // sb_ctr_inc
 
 /** increment the non-distributed counter of the superblock 
@@ -252,23 +264,30 @@ __device__ inline uint new_sb_for_size(uint size_id, uint ihead) {
 			@returns the pointer to the allocated memory, or 0 if unable to allocate
 	*/
 __device__ __forceinline__ void *sb_alloc_in
-(uint ihead, uint isb, uint &iblock, size_info_t size_info, uint size_id) {
-	if(isb == SB_NONE)
+(uint ihead, uint isb, uint &iblock, size_info_t size_info, uint size_id, 
+ bool &needs_new_head) {
+	if(isb == SB_NONE) {
+		needs_new_head = true;
 		return 0;
+	}
 	void *p = 0;
 	uint *block_bits = sb_block_bits(isb);
 	superblock_t sb = sbs_g[isb];
-	// check the superblock occupancy counter
+	// check the superblock occupancy counter; currently unnecessary
 	//uint sb_counter = sb_counters_g[isb];
+	/*
 	uint sb_counter = *(volatile uint *)&sb_counters_g[isb];
 	if(sb_count(sb_counter) >= size_info.busy_threshold) {
 		uint count = sb_count(*(volatile uint *)&sb_counters_g[isb]);
 		//uint count = sb_count(sb_counter);
 		// try allocate nevertheless if head is locked
 		if(count >= size_info.nblocks || 
-			 !*(volatile uint *)&head_locks_g[ihead][size_id])
+			 !*(volatile uint *)&head_locks_g[ihead][size_id]) {
+			needs_new_head = true;
 			return 0;
+		}
 	}
+	*/
 	uint iword, ibit;
 	bool reserved = false;
 	// iterate until successfully reserved
@@ -289,20 +308,24 @@ __device__ __forceinline__ void *sb_alloc_in
 	}
 	if(reserved) {
 		// increment counter
-		if(!sb_ctr_inc(size_id, isb, 1)) {
+		uint inc_mask = sb_ctr_inc(size_id, isb, 1);
+			//if(!sb_ctr_inc(size_id, isb, 1)) {
+		if(!(inc_mask & 1)) {
 			// reservation unsuccessful (slab was freed), cancel it
 			sb_counter_dec(&sb_counters_g[isb], 1);
 			atomicAnd(block_bits + iword, ~(1 << ibit));
 			reserved = false;
-		}
+		} else if(inc_mask & 2)
+			needs_new_head = true;
 	}
 	if(reserved) {
 		p = (char *)sb.ptr + iblock * size_info.block_sz;
 		// write allocation size
 		// TODO: support chunks of other size
-		uint *alloc_sizes = sb_alloc_sizes(isb);
+		//uint *alloc_sizes = sb_alloc_sizes(isb);
 		//sb_set_alloc_size(alloc_sizes, iblock, size_id);
 		//sb_ctr_inc(~0, isb, size_info.block_sz / BLOCK_STEP);
-	}
+	} else
+		needs_new_head = true;
 	return p;
 }  // sb_alloc_in
