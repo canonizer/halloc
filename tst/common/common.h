@@ -40,8 +40,8 @@ struct CommonOpts {
 	CommonOpts() 
 		: allocator(AllocatorHalloc), memory(512 * 1024 * 1024), 
 			halloc_fraction(0.75), busy_fraction(0.82), roomy_fraction(0.25),
-			sparse_fraction(0.05), sb_sz_sh(22), nthreads(1024 * 1024), ntries(4), 
-			alloc_sz(16), nallocs(4), alloc_fraction(0.4), bs(256), period_mask(0) {}
+			sparse_fraction(0.05), sb_sz_sh(22), nthreads(1024 * 1024), ntries(8),
+			alloc_sz(16), nallocs(4), alloc_fraction(0.4), bs(256), period_mask(0) { }
 	/** parses the options from command line, with the defaults specified; memory
 		is also capped to fraction of device-available at this step 
 		@param [in, out] this the default options on the input, and the options
@@ -87,6 +87,12 @@ struct CommonOpts {
 			individual tests may use their own definition */
 	double total_nallocs(void);
 };
+
+/** checks that all the pointers are non-zero 
+		@param d_ptrs device pointers
+		@param nptrs the number of pointers
+ */
+bool check_nz(void **d_ptrs, int nptrs);
 
 #include "halloc-wrapper.h"
 #include "cuda-malloc-wrapper.h"

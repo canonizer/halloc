@@ -45,13 +45,14 @@ public:
 	void operator()(CommonOpts opts, bool warmup) {
 		// allocate memory
 		if(warmup) {
-			opts.nthreads = 4 * opts.bs;
+			opts.nthreads = min(4 * opts.bs, opts.nthreads);
 			opts.ntries = 1;
 		}
 		if(!warmup)
 			printf("latency test\n");
 		int n = opts.nthreads, bs = opts.bs, grid = divup(n, bs);
-		size_t ptrs_sz = n * opts.nallocs * sizeof(void *); 
+		int nptrs = n * opts.nallocs;
+		size_t ptrs_sz = nptrs * sizeof(void *);
 		size_t lat_sz = n * sizeof(double);
 		void **d_ptrs;
 		cucheck(cudaMalloc((void **)&d_ptrs, ptrs_sz));
@@ -70,6 +71,11 @@ public:
 			latency_malloc_k<T> <<<grid, bs>>>(opts, d_ptrs, d_malloc_latencies);
 			cucheck(cudaGetLastError());
 			cucheck(cudaStreamSynchronize(0));
+			// check that pointers are correct
+			if(!check_nz(d_ptrs, nptrs)) {
+				fprintf(stderr, "cannot allocate enough memory\n");
+				exit(-1);
+			}
 			// free
 			latency_free_k<T> <<<grid, bs>>>(opts, d_ptrs, d_free_latencies);
 			cucheck(cudaGetLastError());
@@ -89,9 +95,9 @@ public:
 			}
 			malloc_latency /= opts.total_nallocs();
 			free_latency /= opts.total_nallocs();
-			printf("avg malloc latency %lf cycles\n", malloc_latency);
-			printf("avg free latency %lf cycles\n", free_latency);
-			printf("avg pair latency %lf cycles\n", malloc_latency + free_latency);
+			printf("avg malloc latency %.2lf cycles\n", malloc_latency);
+			printf("avg free latency %.2lf cycles\n", free_latency);
+			printf("avg pair latency %.2lf cycles\n", malloc_latency + free_latency);
 		}  // output latency infos
 
 		// free memory

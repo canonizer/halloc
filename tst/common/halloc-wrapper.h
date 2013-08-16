@@ -18,7 +18,7 @@ public:
 		ha_init(halloc_opts);
 	}
 
-	static inline __device__ void *malloc(int nbytes) {
+	static inline __device__ void *malloc(uint nbytes) {
 		return hamalloc(nbytes);
 	}
 

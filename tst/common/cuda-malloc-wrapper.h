@@ -11,12 +11,12 @@ public:
 		cucheck(cudaDeviceSetLimit(cudaLimitMallocHeapSize, opts.memory));
 	}
 
-	static inline __device__ void *malloc(int nbytes) {
-		return malloc(nbytes);
+	static inline __device__ void *malloc(uint nbytes) {
+		return ::malloc(nbytes);
 	}
 
 	static inline __device__ void free(void *p) {
-		free(p);
+		::free(p);
 	}
 
 	static void shutdown(void) {}

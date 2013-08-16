@@ -17,3 +17,9 @@ test: $(TGT) makefile
 
 clean:
 	rm -f $(TMP)
+	make -C tst/common clean
+	make -C tst/perf clean
+
+build-perf:	$(TGT)
+	make -C tst/common build
+	make -C tst/perf build

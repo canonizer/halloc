@@ -8,6 +8,10 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <thrust/device_ptr.h>
+#include <thrust/logical.h>
+#include <thrust/functional.h>
+
 #include "common.h"
 
 // parsing options
@@ -68,6 +72,7 @@ void CommonOpts::parse_cmdline(int argc, char **argv) {
 	static const char *common_opts_str_g = ":ha:m:C:B:R:S:b:n:t:s:l:f:p:";
 	int c;
 	int period_sh;
+	bool nthreads_explicit = false;
 	while((c = getopt(argc, argv, common_opts_str_g)) != -1) {
 		switch(c) {
 			// general options (and errors)
@@ -109,6 +114,7 @@ void CommonOpts::parse_cmdline(int argc, char **argv) {
 			// test options
 		case 'n':
 			nthreads = parse_int(optarg, 0);
+			nthreads_explicit = true;
 			break;
 		case 't':
 			ntries = parse_int(optarg, 1);
@@ -144,7 +150,7 @@ void CommonOpts::parse_cmdline(int argc, char **argv) {
 							 (unsigned long long)(0.75 * dev_memory));
 
 	// cap number of threads for CUDA allocator
-	if(allocator == AllocatorCuda)
+	if(allocator == AllocatorCuda && !nthreads_explicit)
 		nthreads = min(nthreads, 32 * 1024);
 }  // parse_cmdline
 
@@ -152,3 +158,12 @@ double CommonOpts::total_nallocs(void) {
 	int period = period_mask + 1;
 	return (double)nthreads * ntries * nallocs / period;
 }
+
+struct ptr_is_nz {
+	__host__ __device__ bool operator()(void *p) { return p != 0; }
+};
+
+bool check_nz(void **d_ptrs, int nptrs) {
+	thrust::device_ptr<void *> dt_ptrs(d_ptrs);
+	return thrust::all_of(dt_ptrs, dt_ptrs + nptrs, ptr_is_nz());
+}  // check_nz
