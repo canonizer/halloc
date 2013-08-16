@@ -72,7 +72,7 @@ public:
 			cucheck(cudaGetLastError());
 			cucheck(cudaStreamSynchronize(0));
 			// check that pointers are correct
-			if(!check_nz(d_ptrs, nptrs)) {
+			if(!check_nz(d_ptrs, nptrs, opts.period_mask + 1)) {
 				fprintf(stderr, "cannot allocate enough memory\n");
 				exit(-1);
 			}

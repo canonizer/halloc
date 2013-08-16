@@ -91,8 +91,9 @@ struct CommonOpts {
 /** checks that all the pointers are non-zero 
 		@param d_ptrs device pointers
 		@param nptrs the number of pointers
+		@param period the step with which to check values
  */
-bool check_nz(void **d_ptrs, int nptrs);
+bool check_nz(void **d_ptrs, int nptrs, int period);
 
 #include "halloc-wrapper.h"
 #include "cuda-malloc-wrapper.h"

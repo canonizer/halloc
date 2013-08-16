@@ -273,21 +273,7 @@ __device__ __forceinline__ void *sb_alloc_in
 	void *p = 0;
 	uint *block_bits = sb_block_bits(isb);
 	superblock_t sb = sbs_g[isb];
-	// check the superblock occupancy counter; currently unnecessary
-	//uint sb_counter = sb_counters_g[isb];
-	/*
-	uint sb_counter = *(volatile uint *)&sb_counters_g[isb];
-	if(sb_count(sb_counter) >= size_info.busy_threshold) {
-		uint count = sb_count(*(volatile uint *)&sb_counters_g[isb]);
-		//uint count = sb_count(sb_counter);
-		// try allocate nevertheless if head is locked
-		if(count >= size_info.nblocks || 
-			 !*(volatile uint *)&head_locks_g[ihead][size_id]) {
-			needs_new_head = true;
-			return 0;
-		}
-	}
-	*/
+
 	uint iword, ibit;
 	bool reserved = false;
 	// iterate until successfully reserved

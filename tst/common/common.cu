@@ -8,6 +8,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <thrust/iterator/counting_iterator.h>
 #include <thrust/device_ptr.h>
 #include <thrust/logical.h>
 #include <thrust/functional.h>
@@ -160,10 +161,23 @@ double CommonOpts::total_nallocs(void) {
 }
 
 struct ptr_is_nz {
-	__host__ __device__ bool operator()(void *p) { return p != 0; }
+	void **ptrs;
+	int period;
+	__host__ __device__ ptr_is_nz(void **ptrs, int period) {
+		this->ptrs = ptrs;
+		this->period = period;
+	}
+	__host__ __device__ bool operator()(int i) { 
+		if(i % period == 0) 
+			return ptrs[i] != 0;
+		else
+			return true;
+	}
 };
 
-bool check_nz(void **d_ptrs, int nptrs) {
-	thrust::device_ptr<void *> dt_ptrs(d_ptrs);
-	return thrust::all_of(dt_ptrs, dt_ptrs + nptrs, ptr_is_nz());
+bool check_nz(void **d_ptrs, int nptrs, int period) {
+	//thrust::device_ptr<void *> dt_ptrs(d_ptrs);
+	return thrust::all_of
+		(thrust::counting_iterator<int>(0), thrust::counting_iterator<int>(nptrs),
+		 ptr_is_nz(d_ptrs, period));
 }  // check_nz

@@ -25,9 +25,9 @@
 /** the number of allocation counters*/
 #define NCOUNTERS 4096
 /** thread frequency for initial hashing */
-#define THREAD_FREQ 11
+#define THREAD_FREQ 13
 /** allocation counter increment */
-#define COUNTER_INC 4
+#define COUNTER_INC 5
 
 /** allocation counters */
 __device__ uint counters_g[NCOUNTERS];
@@ -52,13 +52,14 @@ __device__ inline uint size_id_from_nbytes(uint nbytes) {
 /** procedure for small allocation */
 __device__ void *hamalloc_small(uint nbytes) {
 	// the head; having multiple heads actually doesn't help
-	uint ihead = (blockIdx.x / 32) % NHEADS;
-	//uint ihead = 0;
+	//uint ihead = (blockIdx.x / 32) % NHEADS;
+	uint ihead = 0;
 	// ignore zero-sized allocations
 	uint size_id = size_id_from_nbytes(nbytes);
 	//uint head_sb = head_sbs_g[ihead][size_id];
 	uint head_sb = *(volatile uint *)&head_sbs_g[ihead][size_id];
 	size_info_t size_info = size_infos_g[size_id];
+
 	// the counter is based on block id
 	uint tid = threadIdx.x + blockIdx.x * blockDim.x;
 	uint wid = tid / WORD_SZ, lid = tid % WORD_SZ;
@@ -76,10 +77,11 @@ __device__ void *hamalloc_small(uint nbytes) {
 	//  	size_infos_g[size_id].nblocks;
 	// (icounter * WARP_SZ + lid) also provides good initial value qualities
 	// using xor instead of multiplication can provide even higher entropy
-	//uint cv2 = cv >> 3, cv1 = cv & 7;
-	uint iblock = (tid * THREAD_FREQ + 
-								 cv * cv * (cv + 1)) % size_info.nblocks;
-	//uint iblock = (tid * THREAD_FREQ + cv * cv * (cv + 1)) & (size_info.nblocks - 1);
+	//uint cv2 = cv / 2, cv1 = cv % 2;
+	//uint ti2 = tid / 2, ti1 = tid % 2;
+	uint iblock = (tid * THREAD_FREQ +
+								 cv * cv * (cv + 2)) % size_info.nblocks;
+	//uint iblock = (tid * THREAD_FREQ + cv * cv * (cv + 1)) % size_info.nblocks;
 	// main allocation loop
 	bool want_alloc = true, need_roomy_sb = false;
 	// use two-level loop to avoid warplocks
