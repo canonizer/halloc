@@ -167,4 +167,26 @@ void run_test(int argc, char ** argv, CommonOpts &opts, bool with_warmup = true)
 	}
 }  // run_test
 
+/** helper malloc kernel used by many tests throughout */
+template<class T>
+__global__ void malloc_k
+(CommonOpts opts, void **ptrs) {
+	int n = opts.nthreads, i = threadIdx.x + blockIdx.x * blockDim.x;
+	if(i >= n || i & opts.period_mask)
+		return;
+	for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) 
+		ptrs[i + n * ialloc] = T::malloc(opts.alloc_sz);
+}  // throughput_malloc_k
+
+/** helper free kernel used by many tests throughout */
+template<class T>
+__global__ void free_k
+(CommonOpts opts, void **ptrs) {
+	int n = opts.nthreads, i = threadIdx.x + blockIdx.x * blockDim.x;
+	if(i >= n || i & opts.period_mask)
+		return;
+	for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) 
+		T::free(ptrs[i + n * ialloc]);
+}  // throughput_free_k
+
 #endif

@@ -7,6 +7,14 @@ use POSIX;
 $ntests = 0;
 $nsuccesses = 0;
 
+sub runtest {
+		system("./run-test.sh", @_);
+		if($? >> 8 == 0) {
+				$nsuccesses++;
+		}				
+		$ntests++;
+}  # runtest
+
 # correctness memory allocation test; over all sizes, allocate/free 25% memory
 # for each small size, and 12.5% memory for each large size
 $memory = 512 * 1024 * 1024;
@@ -17,12 +25,8 @@ for($alloc_sz = 16; $alloc_sz <= 16 * 1024 * 1024; $alloc_sz += $step) {
 		if($nthreads == 0) {
 				next;
 		}
-		system("./run-test.sh", "checkptr", "-l1", "-t4", "-m$memory", 
-					 "-s$alloc_sz", "-n$nthreads");
-		if($? >> 8 == 0) {
-				$nsuccesses++;
-		}				
-		$ntests++;
+		runtest("checkptr", "-l1", "-t4", "-m$memory", "-s$alloc_sz", 
+						"-n$nthreads");
 		# modify step
 		if($alloc_sz >= 1024 * 1024) {
 				$step = 1024 * 1024;
@@ -40,6 +44,9 @@ for($alloc_sz = 16; $alloc_sz <= 16 * 1024 * 1024; $alloc_sz += $step) {
 				$step = 8;
 		}
 }  # for($step)
+
+# free slabs test - to ensure that slabs are freed correctly
+runtest("freeslabs", "-m$memory");
 
 # print the total count
 $nfails = $ntests - $nsuccesses;

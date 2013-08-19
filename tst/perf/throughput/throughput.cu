@@ -10,25 +10,6 @@
 #include <string.h>
 
 /** measures malloc throughput */
-template<class T>
-__global__ void throughput_malloc_k
-(CommonOpts opts, void **ptrs) {
-	int n = opts.nthreads, i = threadIdx.x + blockIdx.x * blockDim.x;
-	if(i >= n || i & opts.period_mask)
-		return;
-	for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) 
-		ptrs[i + n * ialloc] = T::malloc(opts.alloc_sz);
-}  // throughput_malloc_k
-
-template<class T>
-__global__ void throughput_free_k
-(CommonOpts opts, void **ptrs) {
-	int n = opts.nthreads, i = threadIdx.x + blockIdx.x * blockDim.x;
-	if(i >= n || i & opts.period_mask)
-		return;
-	for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) 
-		T::free(ptrs[i + n * ialloc]);
-}  // throughput_free_k
 
 template<class T> class ThroughputTest {
 	
@@ -54,7 +35,7 @@ public:
 		for(int itry = 0; itry < opts.ntries; itry++) {
 			// allocate
 			double t_malloc_start = omp_get_wtime();
-			throughput_malloc_k<T> <<<grid, bs>>>(opts, d_ptrs);
+			malloc_k<T> <<<grid, bs>>>(opts, d_ptrs);
 			cucheck(cudaGetLastError());
 			cucheck(cudaStreamSynchronize(0));
 			double t_malloc_end = omp_get_wtime();
@@ -66,7 +47,7 @@ public:
 			}
 			// free
 			double t_free_start = omp_get_wtime();
-			throughput_free_k<T> <<<grid, bs>>>(opts, d_ptrs);
+			free_k<T> <<<grid, bs>>>(opts, d_ptrs);
 			cucheck(cudaGetLastError());
 			cucheck(cudaStreamSynchronize(0));
 			double t_free_end = omp_get_wtime();

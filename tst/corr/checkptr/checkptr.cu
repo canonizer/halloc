@@ -9,26 +9,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/** measures malloc latencies; note that latencies are averaged per-thread,
-		per-allocation latencies are not preserved; latencies here are measured in cycles */
-template<class T>
-__global__ void throughput_malloc_k(CommonOpts opts, void **ptrs) {
-	int n = opts.nthreads, i = threadIdx.x + blockIdx.x * blockDim.x;
-	if(i >= n || i & opts.period_mask)
-		return;
-	for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) 
-		ptrs[i + n * ialloc] = T::malloc(opts.alloc_sz);
-}  // latency_malloc_k
-
-template<class T> 
-__global__ void throughput_free_k(CommonOpts opts, void **ptrs) {
-	int n = opts.nthreads, i = threadIdx.x + blockIdx.x * blockDim.x;
-	if(i >= n || i & opts.period_mask)
-		return;
-	for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) 
-		T::free(ptrs[i + n * ialloc]);
-}  // latency_free_k
-
 template<class T> class CheckPtrTest {
 	
 public:
@@ -48,7 +28,7 @@ public:
 		// do testing
 		for(int itry = 0; itry < opts.ntries; itry++) {
 			// allocate
-			throughput_malloc_k<T> <<<grid, bs>>>(opts, d_ptrs);
+			malloc_k<T> <<<grid, bs>>>(opts, d_ptrs);
 			cucheck(cudaGetLastError());
 			cucheck(cudaStreamSynchronize(0));
 			// check that pointers are correct
@@ -56,7 +36,7 @@ public:
 				exit(-1);
 			}
 			// free
-			throughput_free_k<T> <<<grid, bs>>>(opts, d_ptrs);
+			free_k<T> <<<grid, bs>>>(opts, d_ptrs);
 			cucheck(cudaGetLastError());
 			cucheck(cudaStreamSynchronize(0));
 		}  // for(itry)
@@ -69,6 +49,6 @@ public:
 
 int main(int argc, char **argv) {
 	CommonOpts opts;
-	run_test<CheckPtrTest> (argc, argv, opts);
+	run_test<CheckPtrTest> (argc, argv, opts, false);
 	return 0;
 }  // main
