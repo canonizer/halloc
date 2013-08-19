@@ -185,3 +185,4 @@ bool check_nz(void **d_ptrs, int nptrs, int period) {
 		(thrust::counting_iterator<int>(0), thrust::counting_iterator<int>(nptrs),
 		 ptr_is_nz(d_ptrs, period));
 }  // check_nz
+
