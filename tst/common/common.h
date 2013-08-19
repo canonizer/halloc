@@ -98,6 +98,13 @@ struct CommonOpts {
  */
 bool check_nz(void **d_ptrs, int nptrs, int period);
 
+/** checks that all allocations are made properly, i.e. that no pointer is zero,
+		and there's at least alloc_sz memory after each pointer (alloc_sz is the
+		same for all allocations). Parameters are mostly the same as with check_nz()
+		@param alloc_sz size of single allocation
+  */
+bool check_alloc(void **d_ptrs, size_t alloc_sz, int nptrs, int period);
+
 #include "halloc-wrapper.h"
 #include "cuda-malloc-wrapper.h"
 
@@ -123,13 +130,14 @@ void warm_up(void) {
 /** does a test with specific allocator and test functor; it is called after
 		command line parsing */
 template <class T, template<class Ta> class Test>
-void run_test(CommonOpts &opts) {
+void run_test(CommonOpts &opts, bool with_warmup) {
 	T::init(opts);
 	//warm_up<T>();
 	
 	Test<T> test;
-	// warmup
-	test(opts, true);
+	// warmup, if necessary
+	if(with_warmup)
+		test(opts, true);
 	// real run
 	test(opts, false);
 
@@ -139,7 +147,7 @@ void run_test(CommonOpts &opts) {
 /** does a test with specific test functor; basically
 		this is a main function for all the tests */
 template <template<class Ta> class Test >
-void run_test(int argc, char ** argv, CommonOpts &opts) {
+void run_test(int argc, char ** argv, CommonOpts &opts, bool with_warmup = true) {
 	// parse command line
 	opts.parse_cmdline(argc, argv);
 	cucheck(cudaSetDevice(opts.device));
@@ -147,11 +155,11 @@ void run_test(int argc, char ** argv, CommonOpts &opts) {
 	// instantiate based on allocator type
 	switch(opts.allocator) {
 	case AllocatorCuda:
-		run_test <class CudaMalloc, Test> (opts);
+		run_test <class CudaMalloc, Test> (opts, with_warmup);
 		break;
 	case AllocatorHalloc:
 		//printf("testing halloc allocator\n");
-		run_test <class Halloc, Test> (opts);
+		run_test <class Halloc, Test> (opts, with_warmup);
 		break;
 	default:
 		fprintf(stderr, "allocator invalid or not supported\n");

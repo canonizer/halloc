@@ -10,10 +10,13 @@
 
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/device_ptr.h>
-#include <thrust/logical.h>
 #include <thrust/functional.h>
+#include <thrust/logical.h>
+#include <thrust/sort.h>
 
 #include "common.h"
+
+using namespace thrust;
 
 // parsing options
 const char *opts_usage_g = 
@@ -181,8 +184,91 @@ struct ptr_is_nz {
 
 bool check_nz(void **d_ptrs, int nptrs, int period) {
 	//thrust::device_ptr<void *> dt_ptrs(d_ptrs);
-	return thrust::all_of
-		(thrust::counting_iterator<int>(0), thrust::counting_iterator<int>(nptrs),
+	return all_of
+		(counting_iterator<int>(0), counting_iterator<int>(nptrs),
 		 ptr_is_nz(d_ptrs, period));
 }  // check_nz
 
+/** a helper functor to copy to a contiguous location */
+struct copy_cont {
+	void **d_from;
+	int period;
+	__host__ __device__ copy_cont
+	(void **d_from, int period) {
+		this->d_from = d_from;
+		this->period = period;
+	}
+	__host__ __device__ void *operator()(int i) {
+		return d_from[period * i];
+	}
+};  // copy_cont
+
+/** a helper functor to check whether each pointer has enough room */
+struct has_enough_room {
+	uint64 *d_ptrs;
+	size_t alloc_sz;
+	int nptrs;
+	__host__ __device__ has_enough_room(uint64 *d_ptrs, size_t alloc_sz, int nptrs) {
+		this->d_ptrs = d_ptrs;
+		this->alloc_sz = alloc_sz;
+		this->nptrs = nptrs;
+	}  // has_enough_room
+	__host__ __device__ bool operator()(int i) {
+		if(i == nptrs - 1)
+			return true;
+		return d_ptrs[i] + alloc_sz <= d_ptrs[i + 1];
+	}
+};  // has_enough_room
+
+/** a kernel which simply writes thread id at the address specified by each
+		pointer in the passed array */
+__global__ void write_tid_k(void **d_ptrs, int nptrs) {
+	int tid = threadIdx.x + blockIdx.x * blockDim.x;
+	if(tid >= nptrs)
+		return;
+	*(int *)d_ptrs[tid] = tid;
+}  // write_tid_k
+
+/** a helper functor to check tid written at each address */
+struct check_tid {
+	void **d_ptrs;
+	__host__ __device__ check_tid(void **d_ptrs) {
+		this->d_ptrs = d_ptrs;
+	}
+	__host__ __device__ bool operator()(int tid) {
+		return *(int *)d_ptrs[tid] == tid;
+	} 
+}; 
+
+bool check_alloc(void **d_ptrs, size_t alloc_sz, int nptrs, int period) {
+	if(!check_nz(d_ptrs, nptrs, period)) {
+		fprintf(stderr, "cannot allocate enough memory\n");
+		return false;
+	}
+	// first copy into a contiguous location
+	void **d_ptrs_cont = 0;
+	int nptrs_cont = nptrs / period;
+	cucheck(cudaMalloc((void **)&d_ptrs_cont, nptrs_cont * sizeof(void *)));
+	
+	transform
+		(counting_iterator<int>(0), counting_iterator<int>(nptrs_cont),
+		 device_ptr<void *>(d_ptrs_cont), copy_cont(d_ptrs, period));
+	// sort the pointers
+	device_ptr<uint64> dt_ptrs((uint64 *)d_ptrs_cont);
+	sort(dt_ptrs, dt_ptrs + nptrs_cont);
+	// check whether each pointer has enough room
+	if(!all_of(counting_iterator<int>(0), counting_iterator<int>(nptrs_cont), 
+						 has_enough_room((uint64 *)d_ptrs_cont, alloc_sz, nptrs_cont))) {
+		fprintf(stderr, "allocated pointers do not have enough room\n");
+		cucheck(cudaFree(d_ptrs_cont));
+		return false;
+	} 
+
+	// do write-read test to ensure there are no segfaults
+	int bs = 128;
+	write_tid_k<<<divup(nptrs_cont, bs), bs>>>(d_ptrs_cont, nptrs_cont);
+	bool res = all_of(counting_iterator<int>(0), counting_iterator<int>(nptrs_cont), 
+								check_tid(d_ptrs_cont));
+	cucheck(cudaFree(d_ptrs_cont));
+	return res;
+}  // check_alloc
