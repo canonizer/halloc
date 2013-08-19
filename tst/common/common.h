@@ -40,8 +40,9 @@ struct CommonOpts {
 	CommonOpts() 
 		: allocator(AllocatorHalloc), memory(512 * 1024 * 1024), 
 			halloc_fraction(0.75), busy_fraction(0.82), roomy_fraction(0.25),
-			sparse_fraction(0.05), sb_sz_sh(22), nthreads(1024 * 1024), ntries(8),
-			alloc_sz(16), nallocs(4), alloc_fraction(0.4), bs(256), period_mask(0) { }
+			sparse_fraction(0.05), sb_sz_sh(22), device(0), nthreads(1024 * 1024), 
+			ntries(8), alloc_sz(16), nallocs(4), alloc_fraction(0.4), bs(256), 
+			period_mask(0) { }
 	/** parses the options from command line, with the defaults specified; memory
 		is also capped to fraction of device-available at this step 
 		@param [in, out] this the default options on the input, and the options
@@ -66,6 +67,8 @@ struct CommonOpts {
 	int sb_sz_sh;
 	
 	// test parameters
+	/** the device on which everything runs, -D */
+	int device;
 	/** number of threads in the test, -n */
 	int nthreads;
 	/** thread block size, currently only default is available without any options
@@ -139,6 +142,7 @@ template <template<class Ta> class Test >
 void run_test(int argc, char ** argv, CommonOpts &opts) {
 	// parse command line
 	opts.parse_cmdline(argc, argv);
+	cucheck(cudaSetDevice(opts.device));
 
 	// instantiate based on allocator type
 	switch(opts.allocator) {

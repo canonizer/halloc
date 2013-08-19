@@ -70,11 +70,12 @@ AllocatorType parse_allocator(char *str) {
 }  // parse_allocator
 
 void CommonOpts::parse_cmdline(int argc, char **argv) {
-	static const char *common_opts_str_g = ":ha:m:C:B:R:S:b:n:t:s:l:f:p:";
+	static const char *common_opts_str = ":ha:m:C:B:R:S:b:D:n:t:s:l:f:p:";
 	int c;
-	int period_sh;
+	int period_sh, ndevices;
+	cucheck(cudaGetDeviceCount(&ndevices));
 	bool nthreads_explicit = false;
-	while((c = getopt(argc, argv, common_opts_str_g)) != -1) {
+	while((c = getopt(argc, argv, common_opts_str)) != -1) {
 		switch(c) {
 			// general options (and errors)
 		case 'h':
@@ -113,6 +114,9 @@ void CommonOpts::parse_cmdline(int argc, char **argv) {
 			break;
 
 			// test options
+		case 'D':
+			device = parse_int(optarg, 0, ndevices - 1);
+			break;
 		case 'n':
 			nthreads = parse_int(optarg, 0);
 			nthreads_explicit = true;
