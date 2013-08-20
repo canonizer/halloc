@@ -255,6 +255,7 @@ __device__ __forceinline__ uint new_sb_for_size
 		// locked successfully, check if really need replacing blocks
 		uint new_head = SB_NONE;
 		uint roomy_threshold = size_infos_g[size_id].roomy_threshold;
+		uint sparse_threshold = size_infos_g[size_id].sparse_threshold;
 		if(cur_head == SB_NONE || 
 			 sb_count(*(volatile uint *)&sb_counters_g[cur_head]) >=
 			 size_infos_g[size_id].busy_threshold) {
@@ -277,8 +278,11 @@ __device__ __forceinline__ uint new_sb_for_size
 					if(count == 0) {
 						// very unlikely
 						sb_try_mark_free(cur_head, size_id, chunk_id, true);
+					} else if(count <= sparse_threshold) {
+						// also very unlikely
+						sbset_add_to(sparse_sbs_g[chunk_id], cur_head);
 					} else if(count <= roomy_threshold) {
-						// mark as roomy
+						// a bit more likely
 						sbset_add_to(roomy_sbs_g[size_id], cur_head);
 					} 
 				}  // if(there's a head to detach)

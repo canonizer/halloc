@@ -224,7 +224,7 @@ void ha_init(halloc_opts_t opts) {
 	void *bit_blocks, *alloc_sizes;
 	uint nsb_bit_words = sb_sz / (BLOCK_STEP * WORD_SZ),
 		nsb_alloc_words = sb_sz / (BLOCK_STEP * 4);
-	// TODO: make move numbers into constants
+	// TODO: move numbers into constants
 	uint nsb_bit_words_sh = opts.sb_sz_sh - (4 + 5);
 	cuset(nsb_bit_words_g, uint, nsb_bit_words);
 	cuset(nsb_bit_words_sh_g, uint, nsb_bit_words_sh);
@@ -263,6 +263,7 @@ void ha_init(halloc_opts_t opts) {
 		size_info->sparse_threshold = opts.sparse_fraction * size_info->nchunks;
 	}  // for(each size)
 	cuset_arr(size_infos_g, &size_infos);
+	// cuset_arr(size_infos_dg, &size_infos);
 
 	// set grid info
 	uint64 sb_grid[2 * MAX_NSBS];
