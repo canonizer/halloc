@@ -51,18 +51,15 @@ __device__ inline uint size_id_from_nbytes(uint nbytes) {
 }  // size_id_from_nbytes
 
 /** procedure for small allocation */
-__device__ void *hamalloc_small(uint nbytes) {
+__device__ __forceinline__ void *hamalloc_small(uint nbytes) {
 	// the head; having multiple heads actually doesn't help
 	//uint ihead = (blockIdx.x / 32) % NHEADS;
 	uint ihead = 0;
-	// ignore zero-sized allocations
 	uint size_id = size_id_from_nbytes(nbytes);
-	//uint head_sb = head_sbs_g[ihead][size_id];
 	uint head_sb = *(volatile uint *)&head_sbs_g[ihead][size_id];
-	size_info_t size_info = size_infos_g[size_id];
+	size_info_t *size_info = &size_infos_g[size_id];
 
 	// the counter is based on warp id
-	//uint tid = threadIdx.x + blockIdx.x * blockDim.x;
 	uint tid = threadIdx.x + blockIdx.x * blockDim.x;
 	uint wid = tid / WORD_SZ, lid = tid % WORD_SZ;
 	uint leader_lid = warp_leader(__ballot(1));
@@ -82,8 +79,8 @@ __device__ void *hamalloc_small(uint nbytes) {
 	//uint cv2 = cv / 2, cv1 = cv % 2;
 	//uint ti2 = tid / 2, ti1 = tid % 2;
 	// consider returning back to cubic hash on cv
-	uint ichunk = ((tid * THREAD_FREQ +	cv) * size_info.nchunks_in_block)
-		  % size_info.nchunks;
+	uint ichunk = ((tid * THREAD_FREQ +	cv) * size_info->nchunks_in_block)
+		  % size_info->nchunks;
 	// main allocation loop
 	bool want_alloc = true, need_roomy_sb = false;
 	// use two-level loop to avoid warplocks
@@ -91,10 +88,7 @@ __device__ void *hamalloc_small(uint nbytes) {
 		if(want_alloc) {
 			// try allocating in head superblock
 			//head_sb = head_sbs_g[size_id];
-			p = sb_alloc_in(ihead, head_sb, ichunk, size_info, size_id,	
-											need_roomy_sb);
-			//want_alloc = need_roomy_sb;
-			//bool need_roomy_sb = want_alloc = !p;
+			p = sb_alloc_in(ihead, head_sb, ichunk, size_id, need_roomy_sb);
 			want_alloc = !p;
 			while(__any(need_roomy_sb)) {
 				uint need_roomy_mask = __ballot(need_roomy_sb);
@@ -104,7 +98,7 @@ __device__ void *hamalloc_small(uint nbytes) {
 					// here try to check whether a new SB is really needed, and get the
 					// new SB
 					if(lid == leader_lid)
-						head_sb = new_sb_for_size(size_id, size_info.chunk_id, ihead);
+						head_sb = new_sb_for_size(size_id, size_info->chunk_id, ihead);
 					if(size_id == leader_size_id) {
 						head_sb = __shfl((int)head_sb, leader_lid);
 						want_alloc = want_alloc && head_sb != SB_NONE;
@@ -112,17 +106,13 @@ __device__ void *hamalloc_small(uint nbytes) {
 					}
 				}
 			}  // while(need new head superblock)
-			// just quickly return 0
-			// return 0;
 		}
 	} while(__any(want_alloc));
-	//if(!p)
-	//	printf("cannot allocate memory\n");
 	return p;
 }  // hamalloc_small
 
 /** procedure for large allocation */
-__device__ void *hamalloc_large(uint nbytes) {
+__device__ __forceinline__ void *hamalloc_large(uint nbytes) {
 	return malloc(nbytes);
 }  // hamalloc_large
 
@@ -134,7 +124,7 @@ __device__ void *hamalloc(uint nbytes) {
 } // hamalloc
 
 /** procedure for small free*/
-__device__ void hafree_small(void *p, uint sb_id) {
+__device__ __forceinline__ void hafree_small(void *p, uint sb_id) {
 	uint *alloc_sizes = sb_alloc_sizes(sb_id);
 	// TODO: make the read volatile
 	uint chunk_sz = *(volatile uint *)&sbs_g[sb_id].chunk_sz;
@@ -151,7 +141,7 @@ __device__ void hafree_small(void *p, uint sb_id) {
 }  // hafree_small
 
 /** procedure for large free */
-__device__ void hafree_large(void *p) {
+__device__ __forceinline__ void hafree_large(void *p) {
 	return free(p);
 }  // hafree_large
 
@@ -286,6 +276,7 @@ void ha_init(halloc_opts_t opts) {
 	//fprintf(stderr, "started cuda-memsetting\n");
 	//cuvar_memset(unallocated_sbs_g, 0, sizeof(unallocated_sbs_g));
 	cuvar_memset(roomy_sbs_g, 0, sizeof(roomy_sbs_g));
+	cuvar_memset(sparse_sbs_g, 0, sizeof(sparse_sbs_g));
 	//cuvar_memset(roomy_sbs_g, 0, (MAX_NSIZES * SB_SET_SZ * sizeof(uint)));
 	cuvar_memset(head_sbs_g, ~0, sizeof(head_sbs_g));
 	cuvar_memset(cached_sbs_g, ~0, sizeof(head_sbs_g));

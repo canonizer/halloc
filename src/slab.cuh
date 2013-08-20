@@ -20,9 +20,11 @@ __device__ uint sb_counters_g[MAX_NSBS];
 
 /** the set of all unallocated slabs */
 __device__ sbset_t unallocated_sbs_g;
-/** the set of all free superblocks */
+/** the set of all free slabs */
 __device__ sbset_t free_sbs_g;
-/** the set of "roomy" superblocks for the size */
+/** the set of "sparse" slabs for the size */
+__device__ sbset_t sparse_sbs_g[MAX_NCHUNK_IDS];
+/** the set of "roomy" slabs for the size */
 __device__ sbset_t roomy_sbs_g[MAX_NSIZES];
 
 /** head superblocks for each size */
@@ -83,11 +85,12 @@ __device__ inline void sb_try_mark_free
 	if(atomicCAS(&sb_counters_g[sb], old_counter, new_counter) == old_counter) {
 		// slab marked as free, remove it from roomy and add to free
 		if(!from_head)
-			sbset_remove_from(roomy_sbs_g[size_id], sb);
+			sbset_remove_from(sparse_sbs_g[chunk_id], sb);
 		sbs_g[sb].size_id = SZ_NONE;
 		sbs_g[sb].chunk_sz = 0;
 		sbset_add_to(free_sbs_g, sb);
 	} else if(from_head) {
+		// TODO: also check for adding to sparse slabs
 		// add it to non-free
 		sbset_add_to(roomy_sbs_g[size_id], sb);
 	}
@@ -138,11 +141,14 @@ __device__ __forceinline__ void sb_ctr_dec(uint sb_id, uint nchunks) {
 	uint mask, lid = threadIdx.x % WARP_SZ;
 	while(mask = __ballot(want_inc)) {
 		uint leader_lid = warp_leader(mask), leader_sb_id = sb_id;
+		uint leader_nchunks = nchunks;
 		leader_sb_id = __shfl((int)leader_sb_id, leader_lid);
+		leader_nchunks = __shfl((int)leader_nchunks, leader_lid);
 		// allocation size is same for all superblocks
 		// TODO: handle the situation when different allocation sizes are 
 		// freed within the same slab, and do reduction for that
-		uint change = nchunks * __popc(__ballot(sb_id == leader_sb_id));
+		bool want_now = sb_id == leader_sb_id && nchunks == leader_nchunks;
+		uint change = nchunks * __popc(__ballot(want_now));
 		if(lid == leader_lid) {
 			uint old_counter = sb_counter_dec(&sb_counters_g[sb_id], change);
 			if(!sb_is_head(old_counter)) {
@@ -150,39 +156,67 @@ __device__ __forceinline__ void sb_ctr_dec(uint sb_id, uint nchunks) {
 				uint chunk_id = sb_chunk_id(old_counter);
 				// slab is non-head, so do manipulations
 				uint old_count = sb_count(old_counter), new_count = old_count - change;
-				uint threshold = size_infos_g[size_id].roomy_threshold;
-				if(new_count <= threshold && old_count > threshold && new_count > 0) {
+				uint roomy_threshold = size_infos_g[size_id].roomy_threshold;
+				uint sparse_threshold = size_infos_g[size_id].sparse_threshold;
+				if(new_count <= roomy_threshold && old_count > roomy_threshold) {
 					// mark superblock as roomy for current size
 					sbset_add_to(roomy_sbs_g[size_id], sb_id);
-				} else if(new_count == 0) {
+				} else if(new_count <= sparse_threshold && 
+									old_count > sparse_threshold)	{
+					sbset_remove_from(roomy_sbs_g[size_id], sb_id);
+					sbset_add_to(sparse_sbs_g[chunk_id], sb_id);
+				}	else if(new_count == 0) {
 					sb_try_mark_free(sb_id, size_id, chunk_id, false);
 				}  // if(slab position in sets changes)
-				// }
 			}  // if(not a head slab) 
 		} // if(leader lane)
-		want_inc = want_inc && sb_id != leader_sb_id;
+		want_inc = want_inc && !want_now;
 	}  // while(any one wants to deallocate)
 }  // sb_ctr_dec
 
 /** finds a suitable new slab for size and just returns it, without modifying
 		any of the underlying size data structures */
-__device__ inline uint find_sb_for_size(uint size_id, uint chunk_id) {
+__device__ __forceinline__ uint find_sb_for_size(uint size_id, uint chunk_id) {
 	uint new_head = SB_NONE;
+	// TODO: ensure that not checking counts against thresholds really 
+	// doesn't hurt ;)
 	// first try among roomy sb's of current size
 	while((new_head = sbset_get_from(roomy_sbs_g[size_id])) != SB_NONE) {
 		// try set head
 		uint old_counter = atomicOr(&sb_counters_g[new_head], 1 << SB_HEAD_POS);
 		if(sb_is_head(old_counter)) { 
-		} else if(sb_size_id(old_counter) != size_id 
-							|| sb_count(old_counter) > size_infos_g[size_id].roomy_threshold) {
+		} else if(sb_size_id(old_counter) != size_id) {
+			//							|| sb_count(old_counter) > size_infos_g[size_id].roomy_threshold) {
 			// drop the block and go for another
 			// TODO: process this as another head detachment
 			atomicAnd(&sb_counters_g[new_head], ~(1 << SB_HEAD_POS));
 		} else
 			break;
 	}  // while(searching through new heads)
- 
-	// try getting from free superblocks; hear actually getting one 
+
+	// try getting from sparse slabs	
+	if(new_head == SB_NONE) {
+		while((new_head = sbset_get_from(sparse_sbs_g[chunk_id])) != SB_NONE) {
+			// try set head
+			uint old_counter = atomicOr(&sb_counters_g[new_head], 1 << SB_HEAD_POS);
+			if(sb_is_head(old_counter)) { 
+			} else if(sb_chunk_id(old_counter) != chunk_id) {
+								// || sb_count(old_counter) > size_infos_g[size_id].sparse_threshold) {
+				// drop the block and go for another
+				// TODO: process this as another head detachment
+				atomicAnd(&sb_counters_g[new_head], ~(1 << SB_HEAD_POS));
+			} else {
+				// almost there, but still need to set size
+				// TODO: check that this causes no race conditions
+				uint old_size_id = sb_size_id(old_counter) & ((1 << SB_SIZE_POS) - 1);
+				atomicXor(&sb_counters_g[new_head], old_size_id ^ size_id);
+				*(volatile uint *)&sbs_g[new_head].size_id = size_id;
+				break;
+			}
+		}  // while(searching through new heads)
+	}
+
+	// try getting from free slabs; hear actually getting one 
 	// always means success, as only truly free block get to this bit array
 	if(new_head == SB_NONE) {
 		new_head = sbset_get_from(free_sbs_g);
@@ -202,44 +236,6 @@ __device__ inline uint find_sb_for_size(uint size_id, uint chunk_id) {
 		}  // if(got new head from free slabs)
 	}
 	
-	// try stealing head (with fully free counters only) from other sizes;
-	// TODO: make it more reliable, i.e. do not miss locked sizes completely
-#if 0
-	if(new_head == SB_NONE) {
-		for(uint jsize_id = 0; jsize_id < nsizes_g && new_head == SB_NONE;
-				jsize_id++) {
-			if(jsize_id == size_id)
-				continue;
-			// just jump over size ids we're unable to lock
-			if(try_lock(&head_locks_g[0][jsize_id])) {
-				// TODO: add jchunk_id into the equation
-				// currently take fully free heads only
-				uint old_counter = sb_counter_val(0, true, SZ_NONE, jsize_id);
-				uint new_counter = sb_counter_val(0, true, SZ_NONE, size_id);
-				uint head = *(volatile uint *)&cached_sbs_g[0][jsize_id];
-				// TODO: reduce code duplication
-				if(head != SB_NONE && 
-					 atomicCAS(&sb_counters_g[head], old_counter, new_counter) ==
-					 old_counter) {
-					new_head = head;
-					cached_sbs_g[0][jsize_id] = SB_NONE;
-				} else {
-					head = *(volatile uint *)&head_sbs_g[0][jsize_id];
-					if(head != SB_NONE && 
-						 atomicCAS(&sb_counters_g[head], old_counter, new_counter) ==
-						 old_counter) {
-						new_head = head;
-						head_sbs_g[0][jsize_id] = SB_NONE;
-
-					}
-				}
-				if(new_head != SB_NONE)
-					__threadfence();
-				unlock(&head_locks_g[0][jsize_id]);
-			}  // if(locked head)
-		}  // for(jsize_id)
-	}
-#endif
 	return new_head;
 	// TODO: request additional memory from CUDA allocator
 }  // find_sb_for_size
@@ -248,7 +244,7 @@ __device__ inline uint find_sb_for_size(uint size_id, uint chunk_id) {
 		@returns the new head superblock id if found, and SB_NONE if none
 		@remarks this function should be called by at most 1 thread in a warp at a time
 */
-__device__ inline uint new_sb_for_size
+__device__ __forceinline__ uint new_sb_for_size
 (uint size_id, uint chunk_id, uint ihead) {
 	// try locking size id
 	// TODO: make those who failed to lock attempt to allocate
@@ -268,7 +264,7 @@ __device__ inline uint new_sb_for_size
 			// this can happen, e.g., on start
 			if(new_head == SB_NONE)
 				new_head = find_sb_for_size(size_id, chunk_id);
-
+			//new_head = chead;
 			if(new_head != SB_NONE) {
 				// set the new head, so that allocations can continue
 				head_sbs_g[ihead][size_id] = new_head;
@@ -303,7 +299,7 @@ __device__ inline uint new_sb_for_size
 		// someone else working on current head superblock; 
 		while(true) {
 			if(*(volatile uint *)&head_sbs_g[ihead][size_id] != cur_head ||
-							 *(volatile uint *)&head_locks_g[ihead][size_id] == 0)
+				 *(volatile uint *)&head_locks_g[ihead][size_id] == 0)
 				//if(*(volatile uint *)&head_locks_g[ihead][size_id] == 0);
 				break;
 		}
@@ -318,15 +314,17 @@ __device__ inline uint new_sb_for_size
 			@returns the pointer to the allocated memory, or 0 if unable to allocate
 	*/
 __device__ __forceinline__ void *sb_alloc_in
-(uint ihead, uint isb, uint &ichunk, size_info_t size_info, uint size_id,
- bool &needs_new_head) {
+(uint ihead, uint isb, uint &ichunk, uint size_id, bool &needs_new_head) {
+	size_info_t *size_info = &size_infos_g[size_id];
 	if(isb == SB_NONE) {
 		needs_new_head = true;
 		return 0;
 	}
+	//void *p = 0;
 	void *p = 0;
 	uint *block_bits = sb_block_bits(isb);
-	superblock_t sb = sbs_g[isb];
+	//superblock_t sb = sbs_g[isb];
+	void *sbptr = sbs_g[isb].ptr;
 	uint nchunks = size_infos_g[size_id].nchunks_in_block;
 
 	uint iword, ibit, old_word;
@@ -347,15 +345,15 @@ __device__ __forceinline__ void *sb_alloc_in
 				// memory was partially allocated, need to roll back
 				atomicAnd(block_bits + iword, ~alloc_mask | (old_word & alloc_mask));
 			}
-			ichunk = (ichunk + size_info.hash_step) % size_info.nchunks;
+			ichunk = (ichunk + size_info->hash_step) % size_info->nchunks;
 			//ichunk = (ichunk + size_info.hash_step) & (size_info.nchunks - 1);
 		}
 	}
 	if(reserved) {
 		// increment counter
 		uint inc_mask = sb_ctr_inc
-			(size_id, size_info.chunk_id, isb, nchunks);
-			//if(!sb_ctr_inc(size_id, isb, 1)) {
+			(size_id, size_info->chunk_id, isb, nchunks);
+		//if(!sb_ctr_inc(size_id, isb, 1)) {
 		if(!(inc_mask & 1)) {
 			// reservation unsuccessful (slab was freed), cancel it
 			sb_counter_dec(&sb_counters_g[isb], nchunks);
@@ -363,15 +361,16 @@ __device__ __forceinline__ void *sb_alloc_in
 			uint alloc_mask = ((1 << nchunks) - 1) << ibit;
 			atomicAnd(block_bits + iword, ~alloc_mask | (old_word & alloc_mask));
 			reserved = false;
-		} else if(inc_mask & 2)
 			needs_new_head = true;
-	}
-	if(reserved) {
-		p = (char *)sb.ptr + ichunk * size_info.chunk_sz;
-		// write allocation size
-		// TODO: support chunks of other size
-		uint *alloc_sizes = sb_alloc_sizes(isb);
-		sb_set_alloc_size(alloc_sizes, ichunk, nchunks);
+		} else {
+			if(inc_mask & 2)
+				needs_new_head = true;
+			p = (char *)sbptr + ichunk * size_info->chunk_sz;
+			// write allocation size
+			// TODO: support chunks of other size
+			uint *alloc_sizes = sb_alloc_sizes(isb);
+			sb_set_alloc_size(alloc_sizes, ichunk, nchunks);
+		}
 	} else
 		needs_new_head = true;
 	return p;

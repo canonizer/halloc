@@ -5,7 +5,9 @@
 __device__ inline uint sbset_get_from(sbset_t sbset) {
 	// TODO: maybe do several trials to be sure
 	for(uint iword = 0; iword < nsbs_g / WORD_SZ; iword++) {
+		// atomicOr() also works good here
 		uint word = *(volatile uint *)&sbset[iword];
+		//uint word = atomicOr(&sbset[iword], 0);
 		while(word) {
 			uint ibit = __ffs(word) - 1;
 			// try locking the bit

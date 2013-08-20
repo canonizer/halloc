@@ -16,15 +16,15 @@ typedef struct {
 	uint chunk_id;
 	/** number of chunks in a block for this size */
 	uint nchunks_in_block;
+	/** threshold (in chunks) for the slab to be declared "sparse", so that it can
+		be reused by other sizes with the same chunk size */
+	uint sparse_threshold;
 	/** step for the hash function */
 	uint hash_step;
 	/** threshold (in chunks) for the slab to be declared "roomy" */
 	uint roomy_threshold;
 	/** threshold (in chunks) for the slab to be declared "busy" and be detached */
 	uint busy_threshold;
-	/** threshold (in chunks) for the slab to be declared "sparse", so that it can
-		be reused by other sizes with the same chunk size */
-	uint sparse_threshold;
 } size_info_t;
 
 /** maximum number of sizes supported */

@@ -7,6 +7,7 @@
 
 /** superblock set type */
 typedef uint sbset_t[SB_SET_SZ];
+//typedef uint *sbset_t;
 
 //#define WORD_SZ2 64
 
