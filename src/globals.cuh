@@ -10,3 +10,6 @@ __constant__ uint nsbs_g;
 __constant__ uint sb_sz_g;
 /** superblock size shift (for fast division operations) */
 __constant__ uint sb_sz_sh_g;
+
+/** real number of sizes */
+__constant__ uint nsizes_g;

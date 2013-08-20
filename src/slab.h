@@ -11,11 +11,23 @@ enum {
 	SB_HEAD, SB_ROOMY, SB_BUSY
 };
 
+/** possible slab flags */
+enum {
+	/** slab allocated from CUDA device-side memory, and must be freed into it */
+	SB_CUDA = 0x1
+};
+
 /** superblock descriptor type; information is mostly changing; note that during
 		allocation, a superblock is mostly identified by superblock id */
 typedef struct {
-	/** slab size id */
+	/** slab size id 
+			TODO: check if we really need it
+	 */
 	uint size_id;
+	/** slab chunk size */
+	uint chunk_sz;		
+	/** slab flags */
+	//uint flags;
 	/** slab chunk id (currently ignored) */
 	//uint chunk_id;
 	/** slab state */
@@ -67,8 +79,8 @@ __device__ inline bool sb_is_head(uint counter) {
 __host__ __device__ inline uint sb_counter_val
 (uint count, bool is_head, uint chunk_id, uint size_id) {
 	return count << SB_COUNT_POS | (is_head ? 1 : 0) << SB_HEAD_POS |
-		chunk_id & ((1 << SB_CHUNK_SZ) - 1) << SB_CHUNK_POS | 
-		size_id & ((1 << SB_SIZE_SZ) - 1) << SB_SIZE_POS;
+		(chunk_id & ((1 << SB_CHUNK_SZ) - 1)) << SB_CHUNK_POS | 
+		(size_id & ((1 << SB_SIZE_SZ) - 1)) << SB_SIZE_POS;
 }
 /** atomically increments/decrements slab counter, returns old slab counter value */
 __device__ inline uint sb_counter_inc(uint *counter, uint change) {

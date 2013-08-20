@@ -1,6 +1,7 @@
 /** @file halloc.cu implementation of halloc allocator */
 #define HALLOCLIB_COMPILING
 
+#include <assert.h>
 #include <algorithm>
 #include <math.h>
 #include <stdio.h>
@@ -23,11 +24,11 @@
 #include "slab.cuh"
 
 /** the number of allocation counters*/
-#define NCOUNTERS 4096
+#define NCOUNTERS 8192
 /** thread frequency for initial hashing */
 #define THREAD_FREQ 13
 /** allocation counter increment */
-#define COUNTER_INC 5
+#define COUNTER_INC 3
 
 /** allocation counters */
 __device__ uint counters_g[NCOUNTERS];
@@ -60,7 +61,8 @@ __device__ void *hamalloc_small(uint nbytes) {
 	uint head_sb = *(volatile uint *)&head_sbs_g[ihead][size_id];
 	size_info_t size_info = size_infos_g[size_id];
 
-	// the counter is based on block id
+	// the counter is based on warp id
+	//uint tid = threadIdx.x + blockIdx.x * blockDim.x;
 	uint tid = threadIdx.x + blockIdx.x * blockDim.x;
 	uint wid = tid / WORD_SZ, lid = tid % WORD_SZ;
 	uint leader_lid = warp_leader(__ballot(1));
@@ -79,9 +81,9 @@ __device__ void *hamalloc_small(uint nbytes) {
 	// using xor instead of multiplication can provide even higher entropy
 	//uint cv2 = cv / 2, cv1 = cv % 2;
 	//uint ti2 = tid / 2, ti1 = tid % 2;
-	uint iblock = (tid * THREAD_FREQ +
-								 cv * cv * (cv + 2)) % size_info.nblocks;
-	//uint iblock = (tid * THREAD_FREQ + cv * cv * (cv + 1)) % size_info.nblocks;
+	// consider returning back to cubic hash on cv
+	uint ichunk = ((tid * THREAD_FREQ +	cv) * size_info.nchunks_in_block)
+		  % size_info.nchunks;
 	// main allocation loop
 	bool want_alloc = true, need_roomy_sb = false;
 	// use two-level loop to avoid warplocks
@@ -89,7 +91,7 @@ __device__ void *hamalloc_small(uint nbytes) {
 		if(want_alloc) {
 			// try allocating in head superblock
 			//head_sb = head_sbs_g[size_id];
-			p = sb_alloc_in(ihead, head_sb, iblock, size_info, size_id, 
+			p = sb_alloc_in(ihead, head_sb, ichunk, size_info, size_id,	
 											need_roomy_sb);
 			//want_alloc = need_roomy_sb;
 			//bool need_roomy_sb = want_alloc = !p;
@@ -102,7 +104,7 @@ __device__ void *hamalloc_small(uint nbytes) {
 					// here try to check whether a new SB is really needed, and get the
 					// new SB
 					if(lid == leader_lid)
-						head_sb = new_sb_for_size(size_id, ihead);
+						head_sb = new_sb_for_size(size_id, size_info.chunk_id, ihead);
 					if(size_id == leader_size_id) {
 						head_sb = __shfl((int)head_sb, leader_lid);
 						want_alloc = want_alloc && head_sb != SB_NONE;
@@ -133,27 +135,19 @@ __device__ void *hamalloc(uint nbytes) {
 
 /** procedure for small free*/
 __device__ void hafree_small(void *p, uint sb_id) {
-	//uint *alloc_sizes = sb_alloc_sizes(sb_id);
-	//uint ichunk = (uint)((char *)p - (char *)sbs_g[sb_id].ptr) / 16;
-	//uint size_id = sb_get_reset_alloc_size(alloc_sizes, ichunk);
-	uint size_id = sbs_g[sb_id].size_id;
+	uint *alloc_sizes = sb_alloc_sizes(sb_id);
+	// TODO: make the read volatile
+	uint chunk_sz = *(volatile uint *)&sbs_g[sb_id].chunk_sz;
+	uint ichunk = (uint)((char *)p - (char *)sbs_g[sb_id].ptr) / chunk_sz;
+	uint nchunks = sb_get_reset_alloc_size(alloc_sizes, ichunk);
+	//assert(nchunks != 0);
+	//uint size_id = sbs_g[sb_id].size_id;
 	// TODO: ensure that no L1 caching takes place
 	//uint size_id = sb_size_id(sb_counters_g[sb_id]);
 	uint *block_bits = sb_block_bits(sb_id);
-	// free the memory
-	// TODO: this division is what eats all performance
-	// replace it with reciprocal multiplication
-	uint iblock = (uint)((char *)p - (char *)sbs_g[sb_id].ptr) /
-		size_infos_g[size_id].block_sz;
-	//uint iblock = (uint)((char *)p - (char *)sbs_g[sb_id].ptr) / 16;
-	//			size_infos_g[size_id].block_sz;
-	uint iword = iblock / WORD_SZ, ibit = iblock % WORD_SZ;
-	//uint new_word = atomicAnd(block_bits + iword, ~(1 << ibit)) & ~(1 << ibit);
-	atomicAnd(block_bits + iword, ~(1 << ibit));
-	//printf("freeing: sb_id = %d, p = %p, iblock = %d\n", sb_id, p, iblock);
-	//sb_dctr_dec(size_id, sb_id, new_word, iword);
-	//sb_ctr_dec(size_id, sb_id, size_infos_g[size_id].block_sz / BLOCK_STEP);
-	sb_ctr_dec(size_id, sb_id, 1);
+	uint iword = ichunk / WORD_SZ, ibit = ichunk % WORD_SZ;
+	atomicAnd(block_bits + iword, ~(((1 << nchunks) - 1) << ibit));
+	sb_ctr_dec(sb_id, nchunks);
 }  // hafree_small
 
 /** procedure for large free */
@@ -210,6 +204,8 @@ void ha_init(halloc_opts_t opts) {
 	for(uint isb = 0; isb < nsbs_alloc; isb++) {
 		sb_counters[isb] = sb_counter_val(0, false, SZ_NONE, SZ_NONE);
 		sbs[isb].size_id = SZ_NONE;
+		//sbs[isb].flags = 0;
+		sbs[isb].chunk_sz = 0;
 		//sbs[isb].chunk_id = SZ_NONE;
 		//sbs[isb].state = SB_FREE;
 		//sbs[isb].mutex = 0;
@@ -249,7 +245,7 @@ void ha_init(halloc_opts_t opts) {
 	cucheck(cudaMemset(bit_blocks, 0, bit_blocks_sz));
 	cuset(block_bits_g, uint *, (uint *)bit_blocks);
 	cucheck(cudaMalloc(&alloc_sizes, alloc_sizes_sz));
-	cucheck(cudaMemset(alloc_sizes, 0xff, alloc_sizes_sz));
+	cucheck(cudaMemset(alloc_sizes, 0, alloc_sizes_sz));
 	cuset(alloc_sizes_g, uint *, (uint *)alloc_sizes);
 
 	// set sizes info
@@ -261,13 +257,20 @@ void ha_init(halloc_opts_t opts) {
 	for(uint isize = 0; isize < nsizes; isize++) {
 		uint iunit = isize / 2, unit = 1 << (iunit + 3);
 		size_info_t *size_info = &size_infos[isize];
-		size_info->block_sz = isize % 2 ? 3 * unit : 2 * unit;
-		size_info->nblocks = sb_sz / size_info->block_sz;
-		size_info->hash_step = 
-		 	max_prime_below(size_info->nblocks / 256 + size_info->nblocks / 64);
-		//size_info->hash_step = size_info->nblocks / 256 + size_info->nblocks / 64 + 1;
-		size_info->roomy_threshold = opts.roomy_fraction * size_info->nblocks;
-		size_info->busy_threshold = opts.busy_fraction * size_info->nblocks;
+		//size_info->block_sz = isize % 2 ? 3 * unit : 2 * unit;
+		uint block_sz = isize % 2 ? 3 * unit : 2 * unit;
+		uint nblocks = sb_sz / block_sz;
+		size_info->chunk_id = isize % 2 + (isize < nsizes / 2 ? 0 : 2);
+		size_info->chunk_sz = (size_info->chunk_id % 2 ? 3 : 2) * 
+			(size_info->chunk_id / 2 ? 128 : 8);
+		size_info->nchunks_in_block = block_sz / size_info->chunk_sz;
+		size_info->nchunks = nblocks * size_info->nchunks_in_block;
+		// TODO: use a better hash step
+		size_info->hash_step = size_info->nchunks_in_block *
+		 	max_prime_below(nblocks / 256 + nblocks / 64);
+		size_info->roomy_threshold = opts.roomy_fraction * size_info->nchunks;
+		size_info->busy_threshold = opts.busy_fraction * size_info->nchunks;
+		size_info->sparse_threshold = opts.sparse_fraction * size_info->nchunks;
 	}  // for(each size)
 	cuset_arr(size_infos_g, &size_infos);
 

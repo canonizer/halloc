@@ -6,21 +6,31 @@
 /** size information type; this is non-changing information, to be stored in
 		constant memory */
 typedef struct {
-/** block size */
-uint block_sz;
-/** number of blocks in superblock */
-uint nblocks;
-/** step for the hash function */
-uint hash_step;
-/** threshold for the superblock to be declared "roomy" */
-uint roomy_threshold;
-/** threshold for the superblock to be declared "busy" and become candidate for
-		detachment */
-uint busy_threshold;
+	/** block size */
+	//uint block_sz;
+	/** number of chunks in slab */
+	uint nchunks;
+	/** size of a single chunk */
+	uint chunk_sz;
+	/** id of the chunk to which the size belongs */
+	uint chunk_id;
+	/** number of chunks in a block for this size */
+	uint nchunks_in_block;
+	/** step for the hash function */
+	uint hash_step;
+	/** threshold (in chunks) for the slab to be declared "roomy" */
+	uint roomy_threshold;
+	/** threshold (in chunks) for the slab to be declared "busy" and be detached */
+	uint busy_threshold;
+	/** threshold (in chunks) for the slab to be declared "sparse", so that it can
+		be reused by other sizes with the same chunk size */
+	uint sparse_threshold;
 } size_info_t;
 
 /** maximum number of sizes supported */
 #define MAX_NSIZES 64
+/** maximum number of different chunk sizes supported */
+#define MAX_NCHUNK_IDS 8
 /** a "no-size" constant */
 #define SZ_NONE (~0)
 /** block step (16 bytes by default), a power of two */

@@ -19,7 +19,7 @@ sub runtest {
 # for each small size, and 12.5% memory for each large size
 $memory = 512 * 1024 * 1024;
 $step = 8;
-for($alloc_sz = 16; $alloc_sz <= 16 * 1024 * 1024; $alloc_sz += $step) {
+for($alloc_sz = 16; $alloc_sz <= 512 * 1024; $alloc_sz += $step) {
 		$fraction = $alloc_sz <= 2 * 1024 ? 0.25 : 0.125;
 		$nthreads = floor($fraction * $memory / $alloc_sz);
 		if($nthreads == 0) {
