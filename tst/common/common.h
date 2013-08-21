@@ -39,7 +39,7 @@ struct CommonOpts {
 	/** default initialization for common options */
 	CommonOpts() 
 		: allocator(AllocatorHalloc), memory(512 * 1024 * 1024), 
-			halloc_fraction(0.75), busy_fraction(0.82), roomy_fraction(0.25),
+			halloc_fraction(0.75), busy_fraction(0.85), roomy_fraction(0.6),
 			sparse_fraction(0.05), sb_sz_sh(22), device(0), nthreads(1024 * 1024), 
 			ntries(8), alloc_sz(16), nallocs(4), alloc_fraction(0.4), bs(256), 
 			period_mask(0) { }
@@ -107,6 +107,7 @@ bool check_alloc(void **d_ptrs, size_t alloc_sz, int nptrs, int period);
 
 #include "halloc-wrapper.h"
 #include "cuda-malloc-wrapper.h"
+#include "scatter-alloc-wrapper.h"
 
 /** a kernel (and function) for warming up the allocator; a number of memory
 		allocations with a small number of threads are made; the allocations are
@@ -160,6 +161,9 @@ void run_test(int argc, char ** argv, CommonOpts &opts, bool with_warmup = true)
 	case AllocatorHalloc:
 		//printf("testing halloc allocator\n");
 		run_test <class Halloc, Test> (opts, with_warmup);
+		break;
+	case AllocatorScatterAlloc:
+		run_test <class ScatterAlloc, Test> (opts, with_warmup);
 		break;
 	default:
 		fprintf(stderr, "allocator invalid or not supported\n");

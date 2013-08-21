@@ -56,7 +56,7 @@ int parse_int(char *str, int a = INT_MIN, int b = INT_MAX) {
 }  // parse_int
 
 char *allocator_types[] = {
-	"cuda", "halloc", "scatteralloc", "xmalloc"
+	"cuda", "halloc", "scatter", "xmalloc"
 };
 
 AllocatorType parse_allocator(char *str) {

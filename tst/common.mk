@@ -1,6 +1,7 @@
 LIBHALLOC=../../../bin/libhalloc.a
 LIBCOMMON=../../common/libcommontest.a
-LIBS=$(LIBHALLOC) $(LIBCOMMON)
+LIBSCATTER=../../include/libscatteralloc.a
+LIBS=$(LIBHALLOC) $(LIBCOMMON) $(LIBSCATTER)
 SRC_C=*.cu
 SRC_H=../../include/halloc.h ../../common/*.h
 SRC=$(SRC_C) $(SRC_H)

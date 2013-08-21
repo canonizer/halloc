@@ -263,7 +263,6 @@ void ha_init(halloc_opts_t opts) {
 		size_info->sparse_threshold = opts.sparse_fraction * size_info->nchunks;
 	}  // for(each size)
 	cuset_arr(size_infos_g, &size_infos);
-	// cuset_arr(size_infos_dg, &size_infos);
 
 	// set grid info
 	uint64 sb_grid[2 * MAX_NSBS];

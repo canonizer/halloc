@@ -296,7 +296,7 @@ __device__ __forceinline__ uint new_sb_for_size
 		}
 		unlock(&head_locks_g[ihead][size_id]);
 		//uint64 t2 = clock64();
-		//printf("needed %lld cycles to find new head slab\n", t2 - t1);
+		//printf("needed %lld cycles to find new head slabs\n", t2 - t1);
 		//printf("new head = %d\n", new_head);
 		return new_head;
 	} else {
@@ -350,7 +350,7 @@ __device__ __forceinline__ void *sb_alloc_in
 				atomicAnd(block_bits + iword, ~alloc_mask | (old_word & alloc_mask));
 			}
 			ichunk = (ichunk + size_info->hash_step) % size_info->nchunks;
-			//ichunk = (ichunk + size_info.hash_step) & (size_info.nchunks - 1);
+			//ichunk = (ichunk + size_info->hash_step) & (size_info->nchunks - 1);
 		}
 	}
 	if(reserved) {
