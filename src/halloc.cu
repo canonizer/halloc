@@ -23,12 +23,12 @@
 #include "size-info.cuh"
 #include "slab.cuh"
 
-/** the number of allocation counters*/
-#define NCOUNTERS 8192
+/** the number of allocation counters */
+#define NCOUNTERS 1
 /** thread frequency for initial hashing */
 #define THREAD_FREQ 13
 /** allocation counter increment */
-#define COUNTER_INC 3
+#define COUNTER_INC 5
 
 /** allocation counters */
 __device__ uint counters_g[NCOUNTERS];
@@ -70,17 +70,12 @@ __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
 	cv = __shfl((int)cv, leader_lid);
 
 	void *p = 0;
-	// initial position
-	// TODO: use a real but cheap random number generator
-	// uint iblock = (tid * THREAD_FREQ + cv1 + cv2 * cv2 * (cv2 + 1)) %
-	//  	size_infos_g[size_id].nblocks;
-	// (icounter * WARP_SZ + lid) also provides good initial value qualities
-	// using xor instead of multiplication can provide even higher entropy
-	//uint cv2 = cv / 2, cv1 = cv % 2;
-	//uint ti2 = tid / 2, ti1 = tid % 2;
 	// consider returning back to cubic hash on cv
-	uint ichunk = ((tid * THREAD_FREQ +	cv) * size_info->nchunks_in_block)
-		  % size_info->nchunks;
+	// initial position
+	uint ichunk = (icounter + NCOUNTERS * cv) * WARP_SZ + lid;
+	ichunk = ichunk * THREAD_FREQ;
+	//uint ichunk = (icounter * WARP_SZ + lid) * THREAD_FREQ + cv * cv * (cv + 2);
+	ichunk = ichunk * size_info->nchunks_in_block % size_info->nchunks;
 	// main allocation loop
 	bool want_alloc = true, need_roomy_sb = false;
 	// use two-level loop to avoid warplocks
@@ -281,7 +276,8 @@ void ha_init(halloc_opts_t opts) {
 	cuvar_memset(head_sbs_g, ~0, sizeof(head_sbs_g));
 	cuvar_memset(cached_sbs_g, ~0, sizeof(head_sbs_g));
 	cuvar_memset(head_locks_g, 0, sizeof(head_locks_g));
-	cuvar_memset(counters_g, 1, sizeof(counters_g));
+	//cuvar_memset(counters_g, 1, sizeof(counters_g));
+	cuvar_memset(counters_g, 11, sizeof(counters_g));
 	//fprintf(stderr, "finished cuda-memsetting\n");
 	cucheck(cudaStreamSynchronize(0));
 
