@@ -122,7 +122,9 @@ __device__ __forceinline__ uint sb_ctr_inc
 				return_mask &= ~1;
 			uint old_count = sb_count(old_counter);
 			uint threshold = size_infos_g[size_id].busy_threshold;
-			if(old_count < threshold && old_count + change >= threshold)
+			//			if(old_count < threshold && old_count + change >= threshold || 
+			//	 size_id >= 2 && old_count + change >= threshold)
+			if(old_count + change >= threshold && old_count < threshold)
 				return_mask |= 2;
 		}
 		want_inc = want_inc && sb_id != leader_sb_id;
@@ -180,6 +182,7 @@ __device__ __forceinline__ uint find_sb_for_size(uint size_id, uint chunk_id) {
 	uint new_head = SB_NONE;
 	// TODO: ensure that not checking counts against thresholds really 
 	// doesn't hurt ;)
+	// TODO: maybe several trials, as sets tend to be only eventually consistent
 	// first try among roomy sb's of current size
 	while((new_head = sbset_get_from(roomy_sbs_g[size_id])) != SB_NONE) {
 		// try set head
@@ -262,6 +265,7 @@ __device__ __forceinline__ uint new_sb_for_size
 			
 			new_head = cached_sbs_g[ihead][size_id];
 			cached_sbs_g[ihead][size_id] = SB_NONE;
+
 			// this can happen, e.g., on start
 			if(new_head == SB_NONE)
 				new_head = find_sb_for_size(size_id, chunk_id);
@@ -275,16 +279,23 @@ __device__ __forceinline__ uint new_sb_for_size
 					uint old_counter = atomicAnd(&sb_counters_g[cur_head], 
 																			 ~(1 << SB_HEAD_POS));
 					uint count = sb_count(old_counter);
-					if(count == 0) {
-						// very unlikely
-						sb_try_mark_free(cur_head, size_id, chunk_id, true);
-					} else if(count <= sparse_threshold) {
-						// also very unlikely
-						sbset_add_to(sparse_sbs_g[chunk_id], cur_head);
-					} else if(count <= roomy_threshold) {
-						// a bit more likely
-						sbset_add_to(roomy_sbs_g[size_id], cur_head);
-					} 
+					if(count <= roomy_threshold) {
+						if(count == 0) {
+							// very unlikely
+							sb_try_mark_free(cur_head, size_id, chunk_id, true);
+						} else {
+							// uint *sbset = count <= sparse_threshold ? 
+							// 	sparse_sbs_g[chunk_id] : roomy_sbs_g[size_id];
+							// sbset_add_to(sbset, cur_head);
+							if(count <= sparse_threshold) {
+								// also very unlikely
+								sbset_add_to(sparse_sbs_g[chunk_id], cur_head);
+							} else {
+								// a bit more likely
+								sbset_add_to(roomy_sbs_g[size_id], cur_head);
+							}
+						}
+					}
 				}  // if(there's a head to detach)
 				// cache a new head slab
 				cached_sbs_g[ihead][size_id] = find_sb_for_size(size_id, chunk_id);

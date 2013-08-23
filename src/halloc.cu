@@ -23,12 +23,20 @@
 #include "size-info.cuh"
 #include "slab.cuh"
 
+#define MOSTLY_TID_HASH 0
+
 /** the number of allocation counters */
+#if MOSTLY_TID_HASH
+#define NCOUNTERS 8192
+#else
 #define NCOUNTERS 1
+#define COUNTER_FREQ 8192
+#endif
+
 /** thread frequency for initial hashing */
 #define THREAD_FREQ 13
 /** allocation counter increment */
-#define COUNTER_INC 5
+#define COUNTER_INC 1
 
 /** allocation counters */
 __device__ uint counters_g[NCOUNTERS];
@@ -72,9 +80,13 @@ __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
 	void *p = 0;
 	// consider returning back to cubic hash on cv
 	// initial position
-	uint ichunk = (icounter + NCOUNTERS * cv) * WARP_SZ + lid;
-	ichunk = ichunk * THREAD_FREQ;
-	//uint ichunk = (icounter * WARP_SZ + lid) * THREAD_FREQ + cv * cv * (cv + 2);
+#if MOSTLY_TID_HASH
+	uint ichunk = tid * THREAD_FREQ + cv * cv * (cv + 1);
+#else
+  uint ichunk = (icounter + NCOUNTERS * cv) * WARP_SZ + lid;
+  uint cv2 = cv / COUNTER_FREQ;
+  ichunk = ichunk * THREAD_FREQ + cv2 * cv2 * (cv2 + 1);
+#endif
 	ichunk = ichunk * size_info->nchunks_in_block % size_info->nchunks;
 	// main allocation loop
 	bool want_alloc = true, need_roomy_sb = false;
@@ -207,6 +219,7 @@ void ha_init(halloc_opts_t opts) {
 		uint iword = isb / WORD_SZ, ibit = isb % WORD_SZ;
 		free_sbs[iword] |= 1 << ibit;
 	}
+	free_sbs[SB_SET_SZ - 1] = nsbs_alloc;
 	cuset_arr(free_sbs_g, &free_sbs);
 	base_addr = (char *)((uint64)base_addr / sb_sz * sb_sz);
 	if((uint64)base_addr < dev_memory)
@@ -253,6 +266,9 @@ void ha_init(halloc_opts_t opts) {
 		// TODO: use a better hash step
 		size_info->hash_step = size_info->nchunks_in_block *
 		 	max_prime_below(nblocks / 256 + nblocks / 64);
+		//size_info->hash_step = size_info->nchunks_in_block * 17;
+		//printf("block = %d, step = %d, nchunks = %d\n", 
+		//			 block_sz, size_info->hash_step, size_info->nchunks);
 		size_info->roomy_threshold = opts.roomy_fraction * size_info->nchunks;
 		size_info->busy_threshold = opts.busy_fraction * size_info->nchunks;
 		size_info->sparse_threshold = opts.sparse_fraction * size_info->nchunks;
