@@ -176,6 +176,34 @@ __device__ __forceinline__ void sb_ctr_dec(uint sb_id, uint nchunks) {
 	}  // while(any one wants to deallocate)
 }  // sb_ctr_dec
 
+/** detaches the specified head slab */
+__device__ __forceinline__ void detach_head(uint head) {
+	uint old_counter = atomicAnd(&sb_counters_g[head], 
+															 ~(1 << SB_HEAD_POS));
+	uint count = sb_count(old_counter);
+	uint size_id = sb_size_id(old_counter);
+	uint roomy_threshold = size_infos_g[size_id].roomy_threshold;
+	uint sparse_threshold = size_infos_g[size_id].sparse_threshold;
+	if(count <= roomy_threshold) {
+		uint chunk_id = sb_chunk_id(old_counter);
+		if(count == 0) {
+			// very unlikely
+			sb_try_mark_free(head, size_id, chunk_id, true);
+		} else {
+			// uint *sbset = count <= sparse_threshold ? 
+			// 	sparse_sbs_g[chunk_id] : roomy_sbs_g[size_id];
+			// sbset_add_to(sbset, cur_head);
+			if(count <= sparse_threshold) {
+				// also very unlikely
+				sbset_add_to(sparse_sbs_g[chunk_id], head);
+			} else {
+				// a bit more likely
+				sbset_add_to(roomy_sbs_g[size_id], head);
+			}
+		}
+	}
+}  // detach_head
+
 /** finds a suitable new slab for size and just returns it, without modifying
 		any of the underlying size data structures */
 __device__ __forceinline__ uint find_sb_for_size(uint size_id, uint chunk_id) {
@@ -192,7 +220,8 @@ __device__ __forceinline__ uint find_sb_for_size(uint size_id, uint chunk_id) {
 			//							|| sb_count(old_counter) > size_infos_g[size_id].roomy_threshold) {
 			// drop the block and go for another
 			// TODO: process this as another head detachment
-			atomicAnd(&sb_counters_g[new_head], ~(1 << SB_HEAD_POS));
+			//atomicAnd(&sb_counters_g[new_head], ~(1 << SB_HEAD_POS));
+			detach_head(new_head);
 		} else
 			break;
 	}  // while(searching through new heads)
@@ -207,7 +236,8 @@ __device__ __forceinline__ uint find_sb_for_size(uint size_id, uint chunk_id) {
 								// || sb_count(old_counter) > size_infos_g[size_id].sparse_threshold) {
 				// drop the block and go for another
 				// TODO: process this as another head detachment
-				atomicAnd(&sb_counters_g[new_head], ~(1 << SB_HEAD_POS));
+				//atomicAnd(&sb_counters_g[new_head], ~(1 << SB_HEAD_POS));
+				detach_head(new_head);
 			} else {
 				// almost there, but still need to set size
 				// TODO: check that this causes no race conditions
@@ -257,8 +287,8 @@ __device__ __forceinline__ uint new_sb_for_size
 	if(try_lock(&head_locks_g[ihead][size_id])) {
 		// locked successfully, check if really need replacing blocks
 		uint new_head = SB_NONE;
-		uint roomy_threshold = size_infos_g[size_id].roomy_threshold;
-		uint sparse_threshold = size_infos_g[size_id].sparse_threshold;
+		//uint roomy_threshold = size_infos_g[size_id].roomy_threshold;
+		//uint sparse_threshold = size_infos_g[size_id].sparse_threshold;
 		if(cur_head == SB_NONE || 
 			 sb_count(*(volatile uint *)&sb_counters_g[cur_head]) >=
 			 size_infos_g[size_id].busy_threshold) {
@@ -272,32 +302,13 @@ __device__ __forceinline__ uint new_sb_for_size
 			//new_head = chead;
 			if(new_head != SB_NONE) {
 				// set the new head, so that allocations can continue
+				// TODO: check if this threadfence is necessary
+				//__threadfence();
 				head_sbs_g[ihead][size_id] = new_head;
 				__threadfence();
 				// detach current head
-				if(cur_head != SB_NONE) {
-					uint old_counter = atomicAnd(&sb_counters_g[cur_head], 
-																			 ~(1 << SB_HEAD_POS));
-					uint count = sb_count(old_counter);
-					if(count <= roomy_threshold) {
-						if(count == 0) {
-							// very unlikely
-							sb_try_mark_free(cur_head, size_id, chunk_id, true);
-						} else {
-							// uint *sbset = count <= sparse_threshold ? 
-							// 	sparse_sbs_g[chunk_id] : roomy_sbs_g[size_id];
-							// sbset_add_to(sbset, cur_head);
-							if(count <= sparse_threshold) {
-								// also very unlikely
-								sbset_add_to(sparse_sbs_g[chunk_id], cur_head);
-							} else {
-								// a bit more likely
-								sbset_add_to(roomy_sbs_g[size_id], cur_head);
-							}
-						}
-					}
-				}  // if(there's a head to detach)
-				// cache a new head slab
+				if(cur_head != SB_NONE)
+					detach_head(cur_head);
 				cached_sbs_g[ihead][size_id] = find_sb_for_size(size_id, chunk_id);
 				__threadfence();
 			}  // if(found new head)
