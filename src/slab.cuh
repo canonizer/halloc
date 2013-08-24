@@ -182,26 +182,27 @@ __device__ __forceinline__ void detach_head(uint head) {
 															 ~(1 << SB_HEAD_POS));
 	uint count = sb_count(old_counter);
 	uint size_id = sb_size_id(old_counter);
-	uint roomy_threshold = size_infos_g[size_id].roomy_threshold;
-	uint sparse_threshold = size_infos_g[size_id].sparse_threshold;
-	if(count <= roomy_threshold) {
-		uint chunk_id = sb_chunk_id(old_counter);
-		if(count == 0) {
-			// very unlikely
-			sb_try_mark_free(head, size_id, chunk_id, true);
-		} else {
-			// uint *sbset = count <= sparse_threshold ? 
-			// 	sparse_sbs_g[chunk_id] : roomy_sbs_g[size_id];
-			// sbset_add_to(sbset, cur_head);
-			if(count <= sparse_threshold) {
-				// also very unlikely
-				sbset_add_to(sparse_sbs_g[chunk_id], head);
+	// TODO: specialize for head detachment vs. stale search metadata; this
+	// conditional is only necessary in the latter case
+	if(size_id == SZ_NONE) {
+		// unconditionally add to free
+		sbset_add_to(free_sbs_g, head);
+	} else {
+		uint roomy_threshold = size_infos_g[size_id].roomy_threshold;
+		if(count <= roomy_threshold) {
+			uint chunk_id = sb_chunk_id(old_counter);
+			if(count == 0) {
+				sb_try_mark_free(head, size_id, chunk_id, true);
 			} else {
-				// a bit more likely
-				sbset_add_to(roomy_sbs_g[size_id], head);
-			}
-		}
-	}
+				uint sparse_threshold = size_infos_g[chunk_id].sparse_threshold;
+				if(count <= sparse_threshold) {
+					sbset_add_to(sparse_sbs_g[chunk_id], head);
+				} else {
+					sbset_add_to(roomy_sbs_g[size_id], head);
+				}
+			}  // if(free)
+		}  // if(at least roomy)
+	}  // if(size_id == SZ_NONE)
 }  // detach_head
 
 /** finds a suitable new slab for size and just returns it, without modifying
