@@ -64,7 +64,9 @@ public:
 		// estimated
 		if(!warmup) {
 			double pair_throughput = opts.total_nallocs() / t_pair * 1e-6;
+			double pair_speed = opts.total_sz() / t_pair / NBYTES_IN_GIB;
 			printf("pair throughput %.2lf Mpairs/s\n", pair_throughput);
+			printf("pair speed %.2lf GiB/s\n", pair_speed);
 		}  // output latency infos
 
 		// free memory

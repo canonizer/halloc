@@ -60,9 +60,13 @@ public:
 			double free_throughput = opts.total_nallocs() / t_free * 1e-6;
 			double pair_throughput = opts.total_nallocs() / (t_malloc + t_free) 
 				* 1e-6;
+			double malloc_speed = opts.total_sz() / t_malloc / NBYTES_IN_GIB;
+			double pair_speed = opts.total_sz() / (t_malloc + t_free) / NBYTES_IN_GIB;
 			printf("malloc throughput %.2lf Mmallocs/s\n", malloc_throughput);
 			printf("free throughput %.2lf Mfrees/s\n", free_throughput);
 			printf("pair throughput %.2lf Mpairs/s\n", pair_throughput);
+			printf("malloc speed %.2lf GiB/s\n", malloc_speed);
+			printf("pair speed %.2lf GiB/s\n", pair_speed);
 		}  // output latency infos
 
 		// free memory

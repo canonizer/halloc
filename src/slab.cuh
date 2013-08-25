@@ -296,7 +296,6 @@ __device__ __forceinline__ uint new_sb_for_size
 			
 			new_head = cached_sbs_g[ihead][size_id];
 			cached_sbs_g[ihead][size_id] = SB_NONE;
-
 			// this can happen, e.g., on start
 			if(new_head == SB_NONE)
 				new_head = find_sb_for_size(size_id, chunk_id);

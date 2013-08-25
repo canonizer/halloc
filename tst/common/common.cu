@@ -167,6 +167,10 @@ double CommonOpts::total_nallocs(void) {
 	return (double)nthreads * ntries * nallocs / period;
 }
 
+double CommonOpts::total_sz(void) {
+	return alloc_sz * total_nallocs();
+}
+
 struct ptr_is_nz {
 	void **ptrs;
 	int period;

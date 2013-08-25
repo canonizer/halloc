@@ -5,6 +5,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+/** number of bytes in one GiB */
+#define NBYTES_IN_GIB (1024.0 * 1024.0 * 1024.0)
+
 /** a macro for checking CUDA calls */
 #define cucheck(call)																										\
 	{																																			\
@@ -86,9 +89,14 @@ struct CommonOpts {
 	-p specifies period shift
 	*/
 	int period_mask;
-	/** gets the total number of allocations, as usually defined for tests;
-			individual tests may use their own definition */
+	/** gets the total number of allocations, as usually defined for tests; for
+	randomized tests, expectation is returned; individual tests may use their own
+	definition */
 	double total_nallocs(void);
+	/** gets the total size of all the allocations; for randomized tests,
+	expectation is returned
+	*/
+	double total_sz(void);
 };
 
 /** checks that all the pointers are non-zero 
