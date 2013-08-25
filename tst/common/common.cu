@@ -73,11 +73,12 @@ AllocatorType parse_allocator(char *str) {
 }  // parse_allocator
 
 void CommonOpts::parse_cmdline(int argc, char **argv) {
-	static const char *common_opts_str = ":ha:m:C:B:R:S:b:D:n:t:s:l:f:p:";
+	static const char *common_opts_str = ":ha:m:C:B:R:D:n:t:T:s:S:l:f:p:g:";
 	int c;
 	int period_sh, ndevices;
 	cucheck(cudaGetDeviceCount(&ndevices));
-	bool nthreads_explicit = false;
+	bool nthreads_explicit = false, min_alloc_explicit = false, 
+		max_alloc_explicit = false;
 	while((c = getopt(argc, argv, common_opts_str)) != -1) {
 		switch(c) {
 			// general options (and errors)
@@ -109,9 +110,6 @@ void CommonOpts::parse_cmdline(int argc, char **argv) {
 		case 'R':
 			roomy_fraction = parse_double(optarg);
 			break;
-		case 'S':
-			sparse_fraction = parse_double(optarg);
-			break;
 		case 'b':
 			sb_sz_sh = parse_int(optarg, 20, 26);
 			break;
@@ -127,8 +125,32 @@ void CommonOpts::parse_cmdline(int argc, char **argv) {
 		case 't':
 			ntries = parse_int(optarg, 1);
 			break;
+		case 'T':
+			bs = parse_int(optarg, 1, 1024);
+			break;
 		case 's':
+			min_alloc_explicit = true;
 			alloc_sz = parse_int(optarg, 0);
+			if(max_alloc_explicit) { 
+				if(max_alloc_sz < alloc_sz) {
+					fprintf(stderr, "max allocation size should be >= " 
+									"min allocation	size\n");
+					print_usage_and_exit(-1);
+				}
+			} else
+				max_alloc_sz = alloc_sz;
+			break;
+		case 'S':
+			max_alloc_explicit = true;
+			max_alloc_sz = parse_int(optarg, 0);
+			if(min_alloc_explicit) {
+				if(max_alloc_sz < alloc_sz) {
+					fprintf(stderr, "max allocation size should be >= " 
+									"min allocation	size\n");
+					print_usage_and_exit(-1);
+				}
+			} else
+				alloc_sz = max_alloc_sz;
 			break;
 		case 'l':
 			nallocs = parse_int(optarg, 1);
@@ -139,6 +161,9 @@ void CommonOpts::parse_cmdline(int argc, char **argv) {
 		case 'p':
 			period_sh = parse_int(optarg, 0, 31);
 			period_mask = period_sh > 0 ? ((1 << period_sh) - 1) : 0;
+			break;
+		case 'g':
+			group_sh = parse_int(optarg, 0, 31);
 			break;
 
 		default:
@@ -163,8 +188,7 @@ void CommonOpts::parse_cmdline(int argc, char **argv) {
 }  // parse_cmdline
 
 double CommonOpts::total_nallocs(void) {
-	int period = period_mask + 1;
-	return (double)nthreads * ntries * nallocs / period;
+	return (double)nptrs_cont(nthreads) * nallocs * ntries;
 }
 
 double CommonOpts::total_sz(void) {
@@ -173,37 +197,37 @@ double CommonOpts::total_sz(void) {
 
 struct ptr_is_nz {
 	void **ptrs;
-	int period;
-	__host__ __device__ ptr_is_nz(void **ptrs, int period) {
-		this->ptrs = ptrs;
-		this->period = period;
-	}
+	CommonOpts opts;
+	__host__ __device__ ptr_is_nz(void **ptrs, const CommonOpts &opts) :
+		opts(opts), ptrs(ptrs) {}
 	__host__ __device__ bool operator()(int i) { 
-		if(i % period == 0) 
-			return ptrs[i] != 0;
-		else
+		if(opts.is_thread_inactive(i)) 
 			return true;
+		else
+			return ptrs[i] != 0;
 	}
-};
+};  // ptr_is_nz
 
-bool check_nz(void **d_ptrs, int nptrs, int period) {
-	//thrust::device_ptr<void *> dt_ptrs(d_ptrs);
+bool check_nz(void **d_ptrs, uint nptrs, const CommonOpts &opts) {
 	return all_of
 		(counting_iterator<int>(0), counting_iterator<int>(nptrs),
-		 ptr_is_nz(d_ptrs, period));
+		 ptr_is_nz(d_ptrs, opts));
 }  // check_nz
 
 /** a helper functor to copy to a contiguous location */
 struct copy_cont {
 	void **d_from;
-	int period;
-	__host__ __device__ copy_cont
-	(void **d_from, int period) {
-		this->d_from = d_from;
-		this->period = period;
+	CommonOpts opts;
+	uint nptrs_cont;
+	__host__ __device__ copy_cont(void **d_from, const CommonOpts &opts) 
+		: d_from(d_from), opts(opts) {
+		this->nptrs_cont = opts.nptrs_cont(opts.nthreads);
 	}
 	__host__ __device__ void *operator()(int i) {
-		return d_from[period * i];
+		uint period = opts.period(), group = opts.group();
+		uint it = i % nptrs_cont, ialloc = i / nptrs_cont;
+		return d_from[it / group * (period * group) + it % group + 
+									ialloc * opts.nthreads];
 	}
 };  // copy_cont
 
@@ -212,11 +236,9 @@ struct has_enough_room {
 	uint64 *d_ptrs;
 	size_t alloc_sz;
 	int nptrs;
-	__host__ __device__ has_enough_room(uint64 *d_ptrs, size_t alloc_sz, int nptrs) {
-		this->d_ptrs = d_ptrs;
-		this->alloc_sz = alloc_sz;
-		this->nptrs = nptrs;
-	}  // has_enough_room
+	__host__ __device__ has_enough_room
+	(uint64 *d_ptrs, size_t alloc_sz, int	nptrs) 
+		: d_ptrs(d_ptrs), alloc_sz(alloc_sz), nptrs(nptrs) {}
 	__host__ __device__ bool operator()(int i) {
 		if(i == nptrs - 1)
 			return true;
@@ -236,27 +258,28 @@ __global__ void write_tid_k(void **d_ptrs, int nptrs) {
 /** a helper functor to check tid written at each address */
 struct check_tid {
 	void **d_ptrs;
-	__host__ __device__ check_tid(void **d_ptrs) {
-		this->d_ptrs = d_ptrs;
-	}
+	__host__ __device__ check_tid(void **d_ptrs) : d_ptrs(d_ptrs) {}
 	__host__ __device__ bool operator()(int tid) {
 		return *(int *)d_ptrs[tid] == tid;
-	} 
+	}
 }; 
 
-bool check_alloc(void **d_ptrs, size_t alloc_sz, int nptrs, int period) {
-	if(!check_nz(d_ptrs, nptrs, period)) {
+bool check_alloc(void **d_ptrs, uint nptrs, const CommonOpts &opts) {
+	uint alloc_sz = opts.alloc_sz;
+	//uint period = opts.period();
+	if(!check_nz(d_ptrs, nptrs, opts)) {
 		fprintf(stderr, "cannot allocate enough memory\n");
 		return false;
 	}
 	// first copy into a contiguous location
 	void **d_ptrs_cont = 0;
-	int nptrs_cont = nptrs / period;
+	uint group = opts.group();
+	int nptrs_cont = opts.nptrs_cont(nptrs / opts.nallocs) * opts.nallocs;
 	cucheck(cudaMalloc((void **)&d_ptrs_cont, nptrs_cont * sizeof(void *)));
 	
 	transform
 		(counting_iterator<int>(0), counting_iterator<int>(nptrs_cont),
-		 device_ptr<void *>(d_ptrs_cont), copy_cont(d_ptrs, period));
+		 device_ptr<void *>(d_ptrs_cont), copy_cont(d_ptrs, opts));
 	// sort the pointers
 	device_ptr<uint64> dt_ptrs((uint64 *)d_ptrs_cont);
 	sort(dt_ptrs, dt_ptrs + nptrs_cont);

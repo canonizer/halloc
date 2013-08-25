@@ -18,8 +18,10 @@ public:
 			opts.nthreads = min(4 * opts.bs, opts.nthreads);
 			opts.ntries = 1;
 		}
+		// override number of allocations, period and group options
 		opts.nallocs = 1;
 		opts.period_mask = 0;
+		opts.group_sh = 0;
 		int max_n = opts.nthreads, nptrs = max_n * opts.nallocs;
 		// note that here, nthreads is treated as the maximum thread number
 		size_t ptrs_sz = nptrs * sizeof(void *);
@@ -43,14 +45,13 @@ public:
 				nthreads = min(max_n, nthreads);
 				opts.nthreads = nthreads;
 				opts.alloc_sz = alloc_sz;
-				int bs = 256, grid = divup(opts.nthreads, bs);
+				int bs = opts.bs, grid = divup(opts.nthreads, bs);
 				// allocate
 				malloc_k<T> <<<grid, bs>>>(opts, d_ptrs);
 				cucheck(cudaGetLastError());
 				cucheck(cudaStreamSynchronize(0));
 				// check that pointers are correct
-				if(!check_alloc(d_ptrs, opts.alloc_sz, opts.nthreads, 
-												opts.period_mask + 1)) {
+				if(!check_alloc(d_ptrs, opts.nthreads, opts)) {
 					exit(-1);
 				}
 				// free

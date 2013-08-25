@@ -14,7 +14,7 @@ template<class T>
 __global__ void throughput_malloc_free_k
 (CommonOpts opts, void **ptrs) {
 	int n = opts.nthreads, i = threadIdx.x + blockIdx.x * blockDim.x;
-	if(i >= n || i & opts.period_mask)
+	if(opts.is_thread_inactive(i))
 		return;
 	// first allocate
 	for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) 
@@ -54,7 +54,7 @@ public:
 			double t_pair_end = omp_get_wtime();
 			t_pair += t_pair_end - t_pair_start;
 			// as pointers have not been zeroed out, check them nevertheless
-			if(!check_nz(d_ptrs, nptrs, opts.period_mask + 1)) {
+			if(!check_nz(d_ptrs, nptrs, opts)) {
 				fprintf(stderr, "cannot allocate enough memory\n");
 				exit(-1);
 			}

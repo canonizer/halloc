@@ -41,7 +41,7 @@ public:
 			double t_malloc_end = omp_get_wtime();
 			t_malloc += t_malloc_end - t_malloc_start;
 			// check that pointers are correct
-			if(!check_nz(d_ptrs, nptrs, opts.period_mask + 1)) {
+			if(!check_nz(d_ptrs, nptrs, opts)) {
 				fprintf(stderr, "cannot allocate enough memory\n");
 				exit(-1);
 			}

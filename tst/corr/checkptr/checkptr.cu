@@ -32,7 +32,7 @@ public:
 			cucheck(cudaGetLastError());
 			cucheck(cudaStreamSynchronize(0));
 			// check that pointers are correct
-			if(!check_alloc(d_ptrs, opts.alloc_sz, nptrs, opts.period_mask + 1)) {
+			if(!check_alloc(d_ptrs, nptrs, opts)) {
 				exit(-1);
 			}
 			// free

@@ -16,7 +16,7 @@ template<class T>
 __global__ void latency_malloc_k
 (CommonOpts opts, void **ptrs, double *latencies) {
 	int n = opts.nthreads, i = threadIdx.x + blockIdx.x * blockDim.x;
-	if(i >= n || i & opts.period_mask)
+	if(opts.is_thread_inactive(i))
 		return;
 	for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) {
 		uint64 t1 = clock64();
@@ -32,7 +32,7 @@ template<class T>
 __global__ void latency_free_k
 (CommonOpts opts, void **ptrs, double *latencies) {
 	int n = opts.nthreads, i = threadIdx.x + blockIdx.x * blockDim.x;
-	if(i >= n || i & opts.period_mask)
+	if(opts.is_thread_inactive(i))
 		return;
 	for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) {
 		uint64 t1 = clock64();
@@ -80,7 +80,7 @@ public:
 			cucheck(cudaGetLastError());
 			cucheck(cudaStreamSynchronize(0));
 			// check that pointers are correct
-			if(!check_nz(d_ptrs, nptrs, opts.period_mask + 1)) {
+			if(!check_nz(d_ptrs, nptrs, opts)) {
 				fprintf(stderr, "cannot allocate enough memory\n");
 				exit(-1);
 			}

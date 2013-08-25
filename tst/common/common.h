@@ -44,8 +44,8 @@ struct CommonOpts {
 		: allocator(AllocatorHalloc), memory(512 * 1024 * 1024), 
 			halloc_fraction(0.75), busy_fraction(0.87), roomy_fraction(0.6),
 			sparse_fraction(0.05), sb_sz_sh(22), device(0), nthreads(1024 * 1024), 
-			ntries(8), alloc_sz(16), nallocs(4), alloc_fraction(0.4), bs(256), 
-			period_mask(0) { }
+			ntries(8), alloc_sz(16), max_alloc_sz(16), nallocs(4),
+			alloc_fraction(0.4), bs(256), period_mask(0), group_sh(0) { }
 	/** parses the options from command line, with the defaults specified; memory
 		is also capped to fraction of device-available at this step 
 		@param [in, out] this the default options on the input, and the options
@@ -64,7 +64,8 @@ struct CommonOpts {
 	double busy_fraction;
 	/** slab occupancy below which it is declared roomy, -R */
 	double roomy_fraction;
-	/** slab occupancy below which it is declared sparse, -S */
+	/** slab occupancy below which it is declared sparse; currently, no option, as
+		we don't see where it's useful */
 	double sparse_fraction;
 	/** shift of slab size, -b */
 	int sb_sz_sh;
@@ -74,13 +75,14 @@ struct CommonOpts {
 	int device;
 	/** number of threads in the test, -n */
 	int nthreads;
-	/** thread block size, currently only default is available without any options
-	*/
+	/** thread block size, -T	*/
 	int bs;
 	/** number of tries in the test, -t */
 	int ntries;
 	/** allocation size in bytes when fixed, -s */
 	uint alloc_sz;
+	/** maximum alloc size in bytes, -S */
+	uint max_alloc_sz;
 	/** number of allocations per thread, -l */
 	int nallocs;
 	/** fraction of memory to allocate in test, -f */
@@ -89,6 +91,9 @@ struct CommonOpts {
 	-p specifies period shift
 	*/
 	int period_mask;
+	/** group size for period; the "period" parameter is applied to groups, not
+	individual threads; -g */
+	int group_sh;
 	/** gets the total number of allocations, as usually defined for tests; for
 	randomized tests, expectation is returned; individual tests may use their own
 	definition */
@@ -97,44 +102,36 @@ struct CommonOpts {
 	expectation is returned
 	*/
 	double total_sz(void);
+	/** checks whether the thread is inactive */
+	__host__ __device__ bool is_thread_inactive(uint tid) const {
+		return tid >= nthreads || (tid >> group_sh) & period_mask;
+	}
+	/** gets the period */
+	__host__ __device__ uint period(void) const { return period_mask + 1; }
+	/** gets the group size */
+	__host__ __device__ uint group(void) const { return 1 << group_sh; }
+	/** gets the (contiguous) number of pointers for the given number of threads */
+	__host__ __device__ uint nptrs_cont(uint nts) const {
+		return nts / (group() * period()) * group() + 
+			min(nts % (group() * period()), group());
+	}
 };
 
 /** checks that all the pointers are non-zero 
 		@param d_ptrs device pointers
 		@param nptrs the number of pointers
-		@param period the step with which to check values
  */
-bool check_nz(void **d_ptrs, int nptrs, int period);
+bool check_nz(void **d_ptrs, uint nptrs, const CommonOpts &opts);
 
 /** checks that all allocations are made properly, i.e. that no pointer is zero,
 		and there's at least alloc_sz memory after each pointer (alloc_sz is the
 		same for all allocations). Parameters are mostly the same as with check_nz()
-		@param alloc_sz size of single allocation
   */
-bool check_alloc(void **d_ptrs, size_t alloc_sz, int nptrs, int period);
+bool check_alloc(void **d_ptrs, uint nptrs, const CommonOpts &opts);
 
 #include "halloc-wrapper.h"
 #include "cuda-malloc-wrapper.h"
 #include "scatter-alloc-wrapper.h"
-
-/** a kernel (and function) for warming up the allocator; a number of memory
-		allocations with a small number of threads are made; the allocations are
-		then freed, with no measurements performed */
-template<class T>
-__global__ void warm_up_k(uint alloc_sz) {
-	void *p = T::malloc(alloc_sz);
-	T::free(p);
-}  // warm_up_k
-
-template<class T>
-void warm_up(void) {
-	int nthreads = 4, bs = 256;
-	for(uint alloc_sz = 16; alloc_sz < 64; alloc_sz += 8) {
-		warm_up_k<T> <<<divup(nthreads, bs), bs>>>(alloc_sz);
-		cucheck(cudaGetLastError());
-	}
-	cucheck(cudaStreamSynchronize(0));
-}
 
 /** does a test with specific allocator and test functor; it is called after
 		command line parsing */
@@ -184,7 +181,7 @@ template<class T>
 __global__ void malloc_k
 (CommonOpts opts, void **ptrs) {
 	int n = opts.nthreads, i = threadIdx.x + blockIdx.x * blockDim.x;
-	if(i >= n || i & opts.period_mask)
+	if(opts.is_thread_inactive(i))
 		return;
 	for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) 
 		ptrs[i + n * ialloc] = T::malloc(opts.alloc_sz);
@@ -195,7 +192,7 @@ template<class T>
 __global__ void free_k
 (CommonOpts opts, void **ptrs) {
 	int n = opts.nthreads, i = threadIdx.x + blockIdx.x * blockDim.x;
-	if(i >= n || i & opts.period_mask)
+	if(opts.is_thread_inactive(i))
 		return;
 	for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) 
 		T::free(ptrs[i + n * ialloc]);
