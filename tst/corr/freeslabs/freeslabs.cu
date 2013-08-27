@@ -44,7 +44,8 @@ public:
 				int nthreads = (int)floor(fraction * opts.memory / alloc_sz);
 				nthreads = min(max_n, nthreads);
 				opts.nthreads = nthreads;
-				opts.alloc_sz = alloc_sz;
+				opts.alloc_sz = opts.max_alloc_sz = alloc_sz;
+				opts.recompute_fields();
 				int bs = opts.bs, grid = divup(opts.nthreads, bs);
 				// allocate
 				malloc_k<T> <<<grid, bs>>>(opts, d_ptrs);

@@ -19,8 +19,9 @@ __global__ void latency_malloc_k
 	if(opts.is_thread_inactive(i))
 		return;
 	for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) {
+		uint sz = opts.next_alloc_sz();
 		uint64 t1 = clock64();
-		ptrs[i + n * ialloc] = T::malloc(opts.alloc_sz);
+		ptrs[i + n * ialloc] = T::malloc(sz);
 		uint64 t2 = clock64(), latency = t2 - t1;
 		latencies[i + ialloc * n] = (double)latency;
 	}

@@ -28,7 +28,7 @@ public:
 		// do testing
 		for(int itry = 0; itry < opts.ntries; itry++) {
 			// allocate
-			malloc_k<T> <<<grid, bs>>>(opts, d_ptrs);
+			malloc_corr_k<T> <<<grid, bs>>>(opts, d_ptrs);
 			cucheck(cudaGetLastError());
 			cucheck(cudaStreamSynchronize(0));
 			// check that pointers are correct

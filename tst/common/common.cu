@@ -1,5 +1,7 @@
 /** @file common.cu implementation of common library for Halloc testing */
 
+#define COMMONTEST_COMPILING
+
 #include <limits.h>
 #include <omp.h>
 #include <stdio.h>
@@ -59,21 +61,35 @@ char *allocator_types[] = {
 	"cuda", "halloc", "scatter", "xmalloc"
 };
 
-AllocatorType parse_allocator(char *str) {
+char *distr_types[] = {
+	"uniform", "expuniform", "expequal"
+};
+
+static uint parse_enum(char *str, char *name, char **vals, uint top) {
 	int istr;
-	for(istr = 0; istr < AllocatorTopNone - 1; istr++)
-		if(!strcmp(str, allocator_types[istr]))
+	for(istr = 0; istr < top - 1; istr++)
+		if(!strcmp(str, vals[istr]))
 			break;
 	istr++;
-	if(istr == AllocatorTopNone) {
-		printf("%s: invalid allocator name\n", str);
+	if(istr == top) {
+		printf("%s: invalid %s name\n", str, name);
 		print_usage_and_exit(-1);
 	}
-	return (AllocatorType)istr;
+	return istr;
+}  // parse_enum
+
+AllocatorType parse_allocator(char *str) {
+	return (AllocatorType)parse_enum
+		(str, "allocator", allocator_types, AllocatorTopNone);
 }  // parse_allocator
 
+DistrType parse_distr(char *str) {
+	return (DistrType)parse_enum
+		(str, "distribution", distr_types, DistrTopNone);
+}  // parse_distr
+
 void CommonOpts::parse_cmdline(int argc, char **argv) {
-	static const char *common_opts_str = ":ha:m:C:B:R:D:n:t:T:s:S:l:f:p:g:";
+	static const char *common_opts_str = ":ha:m:C:B:R:D:n:t:T:s:S:l:f:p:g:d:";
 	int c;
 	int period_sh, ndevices;
 	cucheck(cudaGetDeviceCount(&ndevices));
@@ -142,7 +158,9 @@ void CommonOpts::parse_cmdline(int argc, char **argv) {
 			break;
 		case 'S':
 			max_alloc_explicit = true;
+			//printf("before setting max_alloc_sz = %d\n", max_alloc_sz);
 			max_alloc_sz = parse_int(optarg, 0);
+			//printf("after setting max_alloc_sz = %d\n", max_alloc_sz);
 			if(min_alloc_explicit) {
 				if(max_alloc_sz < alloc_sz) {
 					fprintf(stderr, "max allocation size should be >= " 
@@ -165,6 +183,9 @@ void CommonOpts::parse_cmdline(int argc, char **argv) {
 		case 'g':
 			group_sh = parse_int(optarg, 0, 31);
 			break;
+		case 'd':
+			distr_type = parse_distr(optarg);
+			break;
 
 		default:
 			fprintf(stderr, "this simply should not happen when parsing options\n");
@@ -185,14 +206,95 @@ void CommonOpts::parse_cmdline(int argc, char **argv) {
 	// cap number of threads for CUDA allocator
 	if(allocator == AllocatorCuda && !nthreads_explicit)
 		nthreads = min(nthreads, 32 * 1024);
+
+	// recompute some fields
+	recompute_fields();
+	//printf("min_sz = %d, max_sz = %d\n", alloc_sz, max_alloc_sz);
 }  // parse_cmdline
+
+double CommonOpts::expected_sz(void) {
+	if(alloc_sz == max_alloc_sz)
+		return alloc_sz;
+	switch(distr_type) {
+	case DistrUniform:
+		return ((double)alloc_sz + max_alloc_sz) / 2;
+	case DistrExpUniform:
+		{
+			double expectation = 0;
+			for(uint sh = 0; sh <= max_alloc_sh; sh++) {
+				double lo = alloc_sz << sh;
+				double hi = min((alloc_sz << (sh + 1)) - 1, max_alloc_sz);
+				expectation += (lo + hi) / 2;
+			}
+			expectation /= max_alloc_sz + 1;
+			return expectation;
+		}
+	case DistrExpEqual:
+		{
+			double expectation = 0, probab = 1;
+			for(uint sh = 0; sh <= max_alloc_sh; sh++) {
+				if(sh < max_alloc_sz)
+					probab /= 2;
+				double lo = alloc_sz << sh;
+				double hi = min((alloc_sz << (sh + 1)) - 1, max_alloc_sz);
+				expectation += (lo + hi) / 2;
+			}
+			expectation /= max_alloc_sz + 1;
+			return expectation;
+		}
+	default:
+		// this shouldn't happen
+		fprintf(stderr, "invalid distribution type\n");
+		exit(-1);
+	}  // switch
+}
 
 double CommonOpts::total_nallocs(void) {
 	return (double)nptrs_cont(nthreads) * nallocs * ntries;
 }
 
 double CommonOpts::total_sz(void) {
-	return alloc_sz * total_nallocs();
+	return expected_sz() * total_nallocs();
+}
+
+void CommonOpts::recompute_fields(void) {
+	// recompute max_alloc_sh
+	max_alloc_sh = 0;
+	while(max_alloc_sz >= alloc_sz << (max_alloc_sh + 1))
+		max_alloc_sh++;
+}  // recompute_fields
+
+void drandom_init(const CommonOpts &opts) {
+	srandom((uint)time(0));
+
+	// TODO: somehow standardize this number
+	const uint MAX_NTHREADS = 8 * 1024 * 1024;
+	uint n = max(MAX_NTHREADS, opts.nthreads);
+	size_t sz = n * sizeof(uint);
+	uint *d_random_states, *h_random_states;
+
+	// allocate memory
+	cucheck(cudaMalloc((void **)&d_random_states, sz));
+	h_random_states = (uint *)malloc(sz);
+
+	// initialize random values, respect groups
+	uint gp = opts.group() * opts.period();
+	uint seed;
+	for(uint i = 0; i < n; i++) {
+		if(i % gp == 0)
+			seed = random();
+		h_random_states[i] = seed;
+	}
+	cucheck(cudaMemcpy(d_random_states, h_random_states, sz, 
+										 cudaMemcpyHostToDevice));
+	free(h_random_states);
+	
+	// initialize device variable
+	cuset(random_states_g, uint *, d_random_states);	
+}  // drandom_init
+
+void drandom_shutdown(const CommonOpts &opts) {
+	// currently nothing is done
 }
 
 struct ptr_is_nz {

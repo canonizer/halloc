@@ -18,7 +18,7 @@ __global__ void throughput_malloc_free_k
 		return;
 	// first allocate
 	for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) 
-		ptrs[i + n * ialloc] = T::malloc(opts.alloc_sz);
+		ptrs[i + n * ialloc] = T::malloc(opts.next_alloc_sz());
 	// then free
 	for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) 
 		T::free(ptrs[i + n * ialloc]);

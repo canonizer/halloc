@@ -6,7 +6,7 @@ TMP=$(TGT) *~ \#*
 
 build: $(TGT) 
 $(TGT):	$(SRC) makefile
-	nvcc -arch=sm_35 -O3 -lib -I../include -o $(TGT) $(SRC_C)
+	nvcc -arch=sm_35 -O3 -rdc=true -lib -I../include -o $(TGT) $(SRC_C)
 
 clean:
 	rm -f $(TMP)

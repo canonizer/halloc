@@ -1,6 +1,7 @@
 #ifndef HALLOC_COMMON_H_
 #define HALLOC_COMMON_H_
 
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,9 +20,20 @@
 	}																																			\
 	}
 
+/** sets CUDA device variable */
+#define cuset(symbol, T, val)																		\
+{																																\
+	void *cuset_addr;																							\
+	cucheck(cudaGetSymbolAddress(&cuset_addr, symbol));						\
+	T cuset_val = (val);																					\
+	cucheck(cudaMemcpy(cuset_addr, &cuset_val, sizeof(cuset_val), \
+										 cudaMemcpyHostToDevice));									\
+}  // cuset
+
 /** division with rounding upwards, useful for kernel calls */
 inline int divup(int a, int b) { return a / b + (a % b ? 1 : 0); }
 
+/** short-name typedef for a long long unsigned type */
 typedef unsigned long long uint64;
 
 /** @file common.h common functions and definitions for testing infrastructure
@@ -36,6 +48,45 @@ typedef enum {
 	AllocatorXMalloc, AllocatorTopNone
 } AllocatorType;
 
+/** supported allocation size distributions */
+typedef enum {
+	DistrNone = 0, DistrUniform, DistrExpUniform, DistrExpEqual, DistrTopNone
+} DistrType;
+
+#ifdef COMMONTEST_COMPILING
+#define COMMONTEST_EXTERN
+#else
+#define COMMONTEST_EXTERN extern
+#endif
+
+/** external variable holding random values, one per thread */
+COMMONTEST_EXTERN uint * __constant__ random_states_g;
+
+/** get the random value on the device */
+static inline  __device__ uint drandom(void) {
+	uint tid = threadIdx.x + blockIdx.x * blockDim.x;
+	uint seed = random_states_g[tid];
+	// TODO: check if other advancements algorithms are faster
+	seed ^= (seed << 13);
+	seed ^= (seed >> 17);
+	seed ^= (seed << 5);
+	/*
+	seed = (seed ^ 61) ^ (seed >> 16);
+	seed *= 9;
+	seed = seed ^ (seed >> 4);
+	seed *= 0x27d4eb2d;
+	seed = seed ^ (seed >> 15);
+	*/
+	random_states_g[tid] = seed;
+	return seed;
+}  // drandom()
+
+/** get the random value within the specified interval (both ends inclusive) on
+		the device */
+static inline __device__ uint drandom(uint a, uint b) {
+	return a + (drandom() & 0x00ffffffu) % (uint)(b - a + 1);
+}  // drandom()
+
 /** common options for tests and allocator intiialization; note that some tests
 		are free to provide their own default settings */
 struct CommonOpts {
@@ -45,7 +96,10 @@ struct CommonOpts {
 			halloc_fraction(0.75), busy_fraction(0.87), roomy_fraction(0.6),
 			sparse_fraction(0.05), sb_sz_sh(22), device(0), nthreads(1024 * 1024), 
 			ntries(8), alloc_sz(16), max_alloc_sz(16), nallocs(4),
-			alloc_fraction(0.4), bs(256), period_mask(0), group_sh(0) { }
+			alloc_fraction(0.4), bs(256), period_mask(0), group_sh(0),
+			distr_type(DistrUniform){	
+		recompute_fields();
+	}
 	/** parses the options from command line, with the defaults specified; memory
 		is also capped to fraction of device-available at this step 
 		@param [in, out] this the default options on the input, and the options
@@ -83,6 +137,8 @@ struct CommonOpts {
 	uint alloc_sz;
 	/** maximum alloc size in bytes, -S */
 	uint max_alloc_sz;
+	/** ceil(log2(max_alloc_sz/alloc_sz) */
+	uint max_alloc_sh;
 	/** number of allocations per thread, -l */
 	int nallocs;
 	/** fraction of memory to allocate in test, -f */
@@ -94,14 +150,57 @@ struct CommonOpts {
 	/** group size for period; the "period" parameter is applied to groups, not
 	individual threads; -g */
 	int group_sh;
+	/** gets the allocation size distribution type */
+	DistrType distr_type;
 	/** gets the total number of allocations, as usually defined for tests; for
 	randomized tests, expectation is returned; individual tests may use their own
-	definition */
+	definition; -d */
 	double total_nallocs(void);
 	/** gets the total size of all the allocations; for randomized tests,
 	expectation is returned
 	*/
 	double total_sz(void);
+	/** gets the single allocation expectation size */
+	double expected_sz(void);
+	/** gets the next allocation size, which can be random */
+	__device__ uint next_alloc_sz(void) const {
+		// single-size case
+		if(!is_random())
+			return alloc_sz;
+		switch(distr_type) {
+		case DistrUniform:
+			{
+				uint sz = drandom(alloc_sz, max_alloc_sz);
+				//sz = min(sz, max_alloc_sz);
+				//printf("sz = %d, alloc_sz = %d, max_alloc_sz = %d\n", sz, alloc_sz, 
+				//			 max_alloc_sz);
+				return sz;
+			}
+		case DistrExpUniform:
+			{
+				// get random shift
+				uint sh = drandom(0, max_alloc_sh);
+				// get a value within the exponential group
+				uint sz = drandom(alloc_sz << sh, (alloc_sz << (sh + 1)) - 1);
+				sz = min(sz, max_alloc_sz);
+				return sz;
+			}
+		case DistrExpEqual:
+			{
+				// get shift, distributed in geometric progression (shift *2 =>
+				// probability / 2)
+				uint sh = __ffs(drandom(1, 1 << (max_alloc_sh + 1))) - 1;
+				// get a value within the exponential group
+				uint sz = drandom(alloc_sz << sh, (alloc_sz << (sh + 1)) - 1);
+				sz = min(sz, max_alloc_sz);
+				return sz;
+			}
+		default:
+			// this should definitely not happen
+			assert(0);
+			return 0;
+		}
+	}  // next_alloc_sz
 	/** checks whether the thread is inactive */
 	__host__ __device__ bool is_thread_inactive(uint tid) const {
 		return tid >= nthreads || (tid >> group_sh) & period_mask;
@@ -115,7 +214,19 @@ struct CommonOpts {
 		return nts / (group() * period()) * group() + 
 			min(nts % (group() * period()), group());
 	}
+	/** checks whether randomization is employed */
+	__host__ __device__ uint is_random(void) const {
+		return alloc_sz != max_alloc_sz;
+	}
+	/** recompute the fields which need be recomputed */
+	void recompute_fields(void);
 };
+
+/** initialize device generation of random numbers */
+void drandom_init(const CommonOpts &opts);
+
+/** shutdown device generation of random numbers */
+void drandom_shutdown(const CommonOpts &opts);
 
 /** checks that all the pointers are non-zero 
 		@param d_ptrs device pointers
@@ -158,6 +269,9 @@ void run_test(int argc, char ** argv, CommonOpts &opts, bool with_warmup = true)
 	opts.parse_cmdline(argc, argv);
 	cucheck(cudaSetDevice(opts.device));
 
+	// initialize random numbers
+	drandom_init(opts);
+
 	// instantiate based on allocator type
 	switch(opts.allocator) {
 	case AllocatorCuda:
@@ -183,9 +297,28 @@ __global__ void malloc_k
 	int n = opts.nthreads, i = threadIdx.x + blockIdx.x * blockDim.x;
 	if(opts.is_thread_inactive(i))
 		return;
-	for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) 
-		ptrs[i + n * ialloc] = T::malloc(opts.alloc_sz);
-}  // throughput_malloc_k
+	for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) {
+		uint sz = opts.next_alloc_sz();
+		void *ptr = T::malloc(sz);
+		ptrs[i + n * ialloc] = ptr;
+	}
+}  // malloc_k
+
+/** helper non-randomized malloc kernel */
+template<class T>
+__global__ void malloc_corr_k
+(CommonOpts opts, void **ptrs) {
+	int n = opts.nthreads, i = threadIdx.x + blockIdx.x * blockDim.x;
+	if(opts.is_thread_inactive(i))
+		return;
+	for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) {
+		uint sz = opts.next_alloc_sz();
+		void *ptr = T::malloc(sz);
+		ptrs[i + n * ialloc] = ptr;
+		if(ptr)
+			*(uint *)ptr = sz;
+	}
+}  // malloc_corr_k
 
 /** helper free kernel used by many tests throughout */
 template<class T>
@@ -196,6 +329,6 @@ __global__ void free_k
 		return;
 	for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) 
 		T::free(ptrs[i + n * ialloc]);
-}  // throughput_free_k
+}  // free_k
 
 #endif

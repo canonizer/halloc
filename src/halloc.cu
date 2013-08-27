@@ -29,6 +29,7 @@
 #if MOSTLY_TID_HASH
 #define NCOUNTERS 8192
 #else
+//define NCOUNTERS MAX_NSIZES
 #define NCOUNTERS 1
 #define COUNTER_FREQ 8192
 #endif
@@ -71,7 +72,9 @@ __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
 	uint tid = threadIdx.x + blockIdx.x * blockDim.x;
 	uint wid = tid / WORD_SZ, lid = tid % WORD_SZ;
 	uint leader_lid = warp_leader(__ballot(1));
+	// TODO: 1 counter per size, distribute increments
 	uint icounter = wid % NCOUNTERS;
+	//uint icounter = size_id;
 	uint cv;
 	if(lid == leader_lid)
 		cv = atomicAdd(&counters_g[icounter], COUNTER_INC);
@@ -84,6 +87,7 @@ __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
 	uint ichunk = tid * THREAD_FREQ + cv * cv * (cv + 1);
 #else
   uint ichunk = (icounter + NCOUNTERS * cv) * WARP_SZ + lid;
+  //uint ichunk = (icounter + cv) * WARP_SZ + lid;
   uint cv2 = cv / COUNTER_FREQ;
   ichunk = ichunk * THREAD_FREQ + cv2 * cv2 * (cv2 + 1);
 #endif
