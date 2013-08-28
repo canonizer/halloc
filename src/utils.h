@@ -92,6 +92,20 @@ __device__ inline uint warp_leader(uint mask) {
 	return __ffs(mask) - 1;
 }
 
+/** gets the lane id inside the warp */
+__device__ inline uint lane_id(void) {
+	uint lid;
+	asm("mov.u32 %0, %laneid;" : "=r" (lid));
+	return lid;
+}
+
+__device__ inline uint lanemask_lt() {
+	uint mask;
+	asm("mov.u32 %0, %lanemask_lt;" : "=r" (mask));
+	return mask;
+}
+
+
 /** find the largest prime number below this one, and not dividing this one */
 uint max_prime_below(uint n);
 

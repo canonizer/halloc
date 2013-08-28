@@ -107,30 +107,32 @@ __device__ __forceinline__ uint sb_ctr_inc
 (uint size_id, uint chunk_id, uint sb_id, uint nchunks) {
 	uint return_mask = 1;
 	bool want_inc = true;
-	uint mask, old_counter, lid = threadIdx.x % WARP_SZ;
-	while(mask = __ballot(want_inc)) {
-		uint leader_lid = warp_leader(mask), leader_sb_id = sb_id;
+	uint mask, old_counter, lid = lane_id(), leader_lid;
+	uint change;
+	//while(mask = __ballot(want_inc)) {
+	//	if(want_inc) {
+	//mask = __ballot(1);
+	while(want_inc) {
+		mask = __ballot(1);
+		leader_lid = warp_leader(mask);
+		uint leader_sb_id = sb_id;
 		leader_sb_id = __shfl((int)leader_sb_id, leader_lid);
 		// allocation size is same for all superblocks
-		//uint change = alloc_sz * __popc(__ballot(sb_id == leader_sb_id));
-		uint change = nchunks * __popc(__ballot(sb_id == leader_sb_id));
+		uint group_mask = __ballot(sb_id == leader_sb_id);
+		change = nchunks * __popc(group_mask);
 		if(lid == leader_lid)
 			old_counter = sb_counter_inc(&sb_counters_g[sb_id], change);
-		if(leader_sb_id == sb_id) {
-			old_counter = __shfl((int)old_counter, leader_lid);
-			if(sb_chunk_id(old_counter) != chunk_id)
-				return_mask &= ~1;
-			uint old_count = sb_count(old_counter);
-			uint threshold = size_infos_g[size_id].busy_threshold;
-			//			if(old_count < threshold && old_count + change >= threshold || 
-			//	 size_id >= 2 && old_count + change >= threshold)
-			if(old_count + change >= threshold && old_count < threshold)
-				return_mask |= 2;
-		}
+		//mask &= ~group_mask;
 		want_inc = want_inc && sb_id != leader_sb_id;
+		//	}
 	}  // while
-	//return true;
-	//return sb_size_id(old_counter) == size_id;
+	old_counter = __shfl((int)old_counter, leader_lid);
+	if(sb_chunk_id(old_counter) != chunk_id)
+		return_mask &= ~1;
+	uint old_count = sb_count(old_counter);
+	uint threshold = size_infos_g[size_id].busy_threshold;
+	if(old_count + change >= threshold && old_count < threshold)
+		return_mask |= 2;
 	return return_mask;
 }  // sb_ctr_inc
 
@@ -140,7 +142,7 @@ __device__ __forceinline__ uint sb_ctr_inc
  */
 __device__ __forceinline__ void sb_ctr_dec(uint sb_id, uint nchunks) {
 	bool want_inc = true;
-	uint mask, lid = threadIdx.x % WARP_SZ;
+	uint mask, lid = lane_id();
 	while(mask = __ballot(want_inc)) {
 		uint leader_lid = warp_leader(mask), leader_sb_id = sb_id;
 		uint leader_nchunks = nchunks;

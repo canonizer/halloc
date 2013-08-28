@@ -89,7 +89,7 @@ DistrType parse_distr(char *str) {
 }  // parse_distr
 
 void CommonOpts::parse_cmdline(int argc, char **argv) {
-	static const char *common_opts_str = ":ha:m:C:B:R:D:n:t:T:s:S:l:f:p:g:d:";
+	static const char *common_opts_str = ":ha:m:C:B:R:D:b:n:t:T:s:S:l:f:p:g:d:";
 	int c;
 	int period_sh, ndevices;
 	cucheck(cudaGetDeviceCount(&ndevices));
@@ -226,7 +226,7 @@ double CommonOpts::expected_sz(void) {
 				double hi = min((alloc_sz << (sh + 1)) - 1, max_alloc_sz);
 				expectation += (lo + hi) / 2;
 			}
-			expectation /= max_alloc_sz + 1;
+			expectation /= max_alloc_sh + 1;
 			return expectation;
 		}
 	case DistrExpEqual:
@@ -237,9 +237,9 @@ double CommonOpts::expected_sz(void) {
 					probab /= 2;
 				double lo = alloc_sz << sh;
 				double hi = min((alloc_sz << (sh + 1)) - 1, max_alloc_sz);
-				expectation += (lo + hi) / 2;
+				expectation += (lo + hi) / 2 * probab;
 			}
-			expectation /= max_alloc_sz + 1;
+			//expectation /= max_alloc_sh + 1;
 			return expectation;
 		}
 	default:

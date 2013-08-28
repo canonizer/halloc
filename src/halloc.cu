@@ -29,9 +29,9 @@
 #if MOSTLY_TID_HASH
 #define NCOUNTERS 8192
 #else
-//define NCOUNTERS MAX_NSIZES
-#define NCOUNTERS 1
-#define COUNTER_FREQ 8192
+#define NCOUNTERS MAX_NSIZES
+//#define NCOUNTERS 1
+#define COUNTER_FREQ 65536
 #endif
 
 /** thread frequency for initial hashing */
@@ -59,6 +59,34 @@ __device__ inline uint size_id_from_nbytes(uint nbytes) {
 	//return (nbytes - MIN_BLOCK_SZ) / BLOCK_STEP;
 }  // size_id_from_nbytes
 
+/** increments counter for specific size, does so in warp-aggregating-friendly
+		fashion */
+__device__ __forceinline__ uint size_ctr_inc(uint size_id) {
+	//return atomicAdd(&counters_g[size_id], 1);
+	bool want_inc = true;
+	uint mask, old_counter, lid = lane_id(), leader_lid, group_mask, change;
+	//uint change = 1;
+	//while(mask = __ballot(want_inc)) {
+	//	if(want_inc) {
+	mask = __ballot(1);
+	while(want_inc) {
+		//mask = __ballot(want_inc);
+		leader_lid = warp_leader(mask);
+		uint leader_size_id = size_id;
+		leader_size_id = __shfl((int)leader_size_id, leader_lid);
+		group_mask = __ballot(size_id == leader_size_id);
+		if(lid == leader_lid)
+			old_counter = atomicAdd(&counters_g[size_id], __popc(group_mask));
+		mask &= ~group_mask;
+		want_inc = want_inc && size_id != leader_size_id;
+		//	}
+	}  // while
+	old_counter = __shfl((int)old_counter, leader_lid);
+	change =  __popc(group_mask & ((1 << lid) - 1));
+	uint cv = old_counter + change;
+	return cv;
+}  // sb_ctr_inc
+
 /** procedure for small allocation */
 __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
 	// the head; having multiple heads actually doesn't help
@@ -69,25 +97,30 @@ __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
 	size_info_t *size_info = &size_infos_g[size_id];
 
 	// the counter is based on warp id
-	uint tid = threadIdx.x + blockIdx.x * blockDim.x;
-	uint wid = tid / WORD_SZ, lid = tid % WORD_SZ;
-	uint leader_lid = warp_leader(__ballot(1));
+	//uint tid = threadIdx.x + blockIdx.x * blockDim.x;
+	//uint wid = tid / WORD_SZ;
+	//uint lid = threadIdx.x % WORD_SZ;
+	uint lid = lane_id();
+	//uint leader_lid = warp_leader(__ballot(1));
+	uint leader_lid;
 	// TODO: 1 counter per size, distribute increments
-	uint icounter = wid % NCOUNTERS;
+	//uint icounter = wid % NCOUNTERS;
 	//uint icounter = size_id;
-	uint cv;
-	if(lid == leader_lid)
-		cv = atomicAdd(&counters_g[icounter], COUNTER_INC);
-	cv = __shfl((int)cv, leader_lid);
-
+	//uint icounter = 0;
+	uint cv = size_ctr_inc(size_id);
+	// uint cv;
+	// if(lid == leader_lid)
+	//  	cv = atomicAdd(&counters_g[icounter], COUNTER_INC);
+	// cv = __shfl((int)cv, leader_lid);
 	void *p = 0;
 	// consider returning back to cubic hash on cv
 	// initial position
 #if MOSTLY_TID_HASH
 	uint ichunk = tid * THREAD_FREQ + cv * cv * (cv + 1);
 #else
-  uint ichunk = (icounter + NCOUNTERS * cv) * WARP_SZ + lid;
-  //uint ichunk = (icounter + cv) * WARP_SZ + lid;
+  //uint ichunk = (icounter + NCOUNTERS * cv) * WARP_SZ + lid;
+  //uint ichunk = (icounter + cv) * WARP_SZ + (lid + (uint)clock()) % WARP_SZ;
+	uint ichunk = cv;
   uint cv2 = cv / COUNTER_FREQ;
   ichunk = ichunk * THREAD_FREQ + cv2 * cv2 * (cv2 + 1);
 #endif
