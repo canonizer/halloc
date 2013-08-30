@@ -31,11 +31,11 @@
 #else
 #define NCOUNTERS MAX_NSIZES
 //#define NCOUNTERS 1
-#define COUNTER_FREQ 65536
+#define COUNTER_FREQ (128 * 1024)
 #endif
 
 /** thread frequency for initial hashing */
-#define THREAD_FREQ 13
+#define THREAD_FREQ 11
 /** allocation counter increment */
 #define COUNTER_INC 1
 
@@ -121,10 +121,12 @@ __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
   //uint ichunk = (icounter + NCOUNTERS * cv) * WARP_SZ + lid;
   //uint ichunk = (icounter + cv) * WARP_SZ + (lid + (uint)clock()) % WARP_SZ;
 	uint ichunk = cv;
-  uint cv2 = cv / COUNTER_FREQ;
-  ichunk = ichunk * THREAD_FREQ + cv2 * cv2 * (cv2 + 1);
+  //uint cv2 = cv / COUNTER_FREQ;
+  //ichunk = ichunk * THREAD_FREQ + cv2 * cv2 * cv2;
+	ichunk = ichunk * THREAD_FREQ;
 #endif
 	ichunk = ichunk * size_info->nchunks_in_block % size_info->nchunks;
+	//ichunk = ichunk * size_info->nchunks_in_block & (size_info->nchunks - 1);
 	// main allocation loop
 	bool want_alloc = true, need_roomy_sb = false;
 	// use two-level loop to avoid warplocks
@@ -172,6 +174,7 @@ __device__ __forceinline__ void hafree_small(void *p, uint sb_id) {
 	uint *alloc_sizes = sb_alloc_sizes(sb_id);
 	// TODO: make the read volatile
 	uint chunk_sz = *(volatile uint *)&sbs_g[sb_id].chunk_sz;
+	//uint chunk_sz = 16;
 	uint ichunk = (uint)((char *)p - (char *)sbs_g[sb_id].ptr) / chunk_sz;
 	uint nchunks = sb_get_reset_alloc_size(alloc_sizes, ichunk);
 	//assert(nchunks != 0);
