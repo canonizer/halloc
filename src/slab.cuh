@@ -296,8 +296,10 @@ __device__ __forceinline__ uint new_sb_for_size
 			 sb_count(*(volatile uint *)&sb_counters_g[cur_head]) >=
 			 size_infos_g[size_id].busy_threshold) {
 			
+#if CACHE_HEAD_SBS
 			new_head = cached_sbs_g[ihead][size_id];
 			cached_sbs_g[ihead][size_id] = SB_NONE;
+#endif
 			// this can happen, e.g., on start
 			if(new_head == SB_NONE)
 				new_head = find_sb_for_size(size_id, chunk_id);
@@ -311,7 +313,9 @@ __device__ __forceinline__ uint new_sb_for_size
 				// detach current head
 				if(cur_head != SB_NONE)
 					detach_head(cur_head);
+#if CACHE_HEAD_SBS
 				cached_sbs_g[ihead][size_id] = find_sb_for_size(size_id, chunk_id);
+#endif
 				__threadfence();
 			}  // if(found new head)
 		} else {
@@ -372,6 +376,12 @@ __device__ __forceinline__ void *sb_alloc_in
 			if(~old_word & alloc_mask) {
 				// memory was partially allocated, need to roll back
 				atomicAnd(block_bits + iword, ~alloc_mask | (old_word & alloc_mask));
+			}
+			if(itry > 0 && itry % CHECK_NTRIES == 0) {
+				// check the counter
+				uint count = sb_count(*(volatile uint *)&sb_counters_g[isb]);
+				if(count >= size_info->busy_threshold)
+					break;
 			}
 			ichunk = (ichunk + size_info->hash_step) % size_info->nchunks;
 			//ichunk = (ichunk + size_info->hash_step) & (size_info->nchunks - 1);
