@@ -16,12 +16,14 @@ __global__ void throughput_malloc_free_k
 	int n = opts.nthreads, i = threadIdx.x + blockIdx.x * blockDim.x;
 	if(opts.is_thread_inactive(i))
 		return;
-	// first allocate
-	for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) 
-		ptrs[i + n * ialloc] = T::malloc(opts.next_alloc_sz());
-	// then free
-	for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) 
-		T::free(ptrs[i + n * ialloc]);
+	for(int iter = 0; iter < opts.niters; iter++) {
+		// first allocate
+		for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) 
+			ptrs[i + n * ialloc] = T::malloc(opts.next_alloc_sz());
+		// then free
+		for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) 
+			T::free(ptrs[i + n * ialloc]);
+	}
 }  // throughput_malloc_k
 
 template<class T> class PrivThroughputTest {

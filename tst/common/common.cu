@@ -89,7 +89,7 @@ DistrType parse_distr(char *str) {
 }  // parse_distr
 
 void CommonOpts::parse_cmdline(int argc, char **argv) {
-	static const char *common_opts_str = ":ha:m:C:B:R:D:b:n:t:T:s:S:l:f:p:g:d:";
+	static const char *common_opts_str = ":ha:m:C:B:R:D:b:n:t:T:s:S:l:i:f:q:g:d:";
 	int c;
 	int period_sh, ndevices;
 	cucheck(cudaGetDeviceCount(&ndevices));
@@ -173,10 +173,13 @@ void CommonOpts::parse_cmdline(int argc, char **argv) {
 		case 'l':
 			nallocs = parse_int(optarg, 1);
 			break;
+		case 'i':
+			niters = parse_int(optarg, 1);
+			break;
 		case 'f':
 			alloc_fraction = parse_double(optarg);
 			break;
-		case 'p':
+		case 'q':
 			period_sh = parse_int(optarg, 0, 31);
 			period_mask = period_sh > 0 ? ((1 << period_sh) - 1) : 0;
 			break;
@@ -250,7 +253,7 @@ double CommonOpts::expected_sz(void) {
 }
 
 double CommonOpts::total_nallocs(void) {
-	return (double)nptrs_cont(nthreads) * nallocs * ntries;
+	return (double)nptrs_cont(nthreads) * nallocs * niters * ntries;
 }
 
 double CommonOpts::total_sz(void) {

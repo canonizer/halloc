@@ -95,7 +95,7 @@ struct CommonOpts {
 		: allocator(AllocatorHalloc), memory(512 * 1024 * 1024), 
 			halloc_fraction(0.75), busy_fraction(0.9), roomy_fraction(0.6),
 			sparse_fraction(0.05), sb_sz_sh(22), device(0), nthreads(1024 * 1024), 
-			ntries(8), alloc_sz(16), max_alloc_sz(16), nallocs(4),
+			ntries(8), alloc_sz(16), max_alloc_sz(16), nallocs(4), niters(1),
 			alloc_fraction(0.4), bs(128), period_mask(0), group_sh(0),
 			distr_type(DistrUniform){	
 		recompute_fields();
@@ -141,10 +141,13 @@ struct CommonOpts {
 	uint max_alloc_sh;
 	/** number of allocations per thread, -l */
 	int nallocs;
+	/** number of inside-kernel iterations, applicable only to priv-* samples,
+	forced to one in other cases, -i */
+	int niters;
 	/** fraction of memory to allocate in test, -f */
 	double alloc_fraction;
 	/** period mask, indicates one of how many threads actually does allocation;
-	-p specifies period shift
+	-q specifies period shift
 	*/
 	int period_mask;
 	/** group size for period; the "period" parameter is applied to groups, not

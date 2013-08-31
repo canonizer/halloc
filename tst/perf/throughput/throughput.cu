@@ -15,6 +15,7 @@ template<class T> class ThroughputTest {
 	
 public:
 	void operator()(CommonOpts opts, bool warmup) {
+		opts.niters = 1;
 		// allocate memory
 		if(warmup) {
 			opts.nthreads = min(4 * opts.bs, opts.nthreads);
