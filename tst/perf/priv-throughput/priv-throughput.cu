@@ -56,7 +56,7 @@ public:
 			double t_pair_end = omp_get_wtime();
 			t_pair += t_pair_end - t_pair_start;
 			// as pointers have not been zeroed out, check them nevertheless
-			if(!check_nz(d_ptrs, nptrs, opts)) {
+			if(!check_nz(d_ptrs, 0, nptrs, opts)) {
 				fprintf(stderr, "cannot allocate enough memory\n");
 				exit(-1);
 			}

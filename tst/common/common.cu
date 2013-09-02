@@ -89,7 +89,7 @@ DistrType parse_distr(char *str) {
 }  // parse_distr
 
 void CommonOpts::parse_cmdline(int argc, char **argv) {
-	static const char *common_opts_str = ":ha:m:C:B:R:D:b:n:t:T:s:S:l:i:f:q:g:d:";
+	static const char *common_opts_str = ":ha:m:C:B:R:D:b:n:t:T:s:S:l:i:f:q:g:d:p:P:";
 	int c;
 	int period_sh, ndevices;
 	cucheck(cudaGetDeviceCount(&ndevices));
@@ -189,6 +189,12 @@ void CommonOpts::parse_cmdline(int argc, char **argv) {
 		case 'd':
 			distr_type = parse_distr(optarg);
 			break;
+		case 'p':
+			palloc = (float)parse_double(optarg);
+			break;
+		case 'P':
+			pfree = (float)parse_double(optarg);
+			break;
 
 		default:
 			fprintf(stderr, "this simply should not happen when parsing options\n");
@@ -209,6 +215,12 @@ void CommonOpts::parse_cmdline(int argc, char **argv) {
 	// cap number of threads for CUDA allocator
 	if(allocator == AllocatorCuda && !nthreads_explicit)
 		nthreads = min(nthreads, 32 * 1024);
+	// check probabilities
+	// if(palloc + pfree > 1) {
+	// 	printf("palloc = %lf, pfree = %lf, total > 1\n", (double)palloc, 
+	// 				 (double)pfree);
+	// 	print_usage_and_exit(-1);
+	// }
 
 	// recompute some fields
 	recompute_fields();
@@ -302,39 +314,41 @@ void drandom_shutdown(const CommonOpts &opts) {
 
 struct ptr_is_nz {
 	void **ptrs;
+	uint *ctrs;
 	CommonOpts opts;
-	__host__ __device__ ptr_is_nz(void **ptrs, const CommonOpts &opts) :
-		opts(opts), ptrs(ptrs) {}
+	__host__ __device__ ptr_is_nz
+	(void **ptrs, uint *ctrs, const CommonOpts &opts) 
+		: opts(opts), ptrs(ptrs), ctrs(ctrs) {}
 	__host__ __device__ bool operator()(int i) { 
 		if(opts.is_thread_inactive(i)) 
 			return true;
-		else
-			return ptrs[i] != 0;
-	}
+		else {
+			uint ctr = ctrs ? ctrs[i] : 1;
+			for(uint ialloc = 0; ialloc < ctr; ialloc++) {
+				if(!ptrs[ialloc * opts.nthreads + i])
+					return false;
+			}
+			return true;
+		}
+	}  // operator ()
 };  // ptr_is_nz
 
-bool check_nz(void **d_ptrs, uint nptrs, const CommonOpts &opts) {
+bool check_nz(void **d_ptrs, uint *d_ctrs, uint nptrs, const CommonOpts &opts) {
 	return all_of
 		(counting_iterator<int>(0), counting_iterator<int>(nptrs),
-		 ptr_is_nz(d_ptrs, opts));
+		 ptr_is_nz(d_ptrs, d_ctrs, opts));
 }  // check_nz
 
-/** a helper functor to copy to a contiguous location */
-struct copy_cont {
-	void **d_from;
-	CommonOpts opts;
-	uint nptrs_cont;
-	__host__ __device__ copy_cont(void **d_from, const CommonOpts &opts) 
-		: d_from(d_from), opts(opts) {
-		this->nptrs_cont = opts.nptrs_cont(opts.nthreads);
-	}
-	__host__ __device__ void *operator()(int i) {
-		uint period = opts.period(), group = opts.group();
-		uint it = i % nptrs_cont, ialloc = i / nptrs_cont;
-		return d_from[it / group * (period * group) + it % group + 
-									ialloc * opts.nthreads];
-	}
-};  // copy_cont
+__global__ void copy_cont_k
+(void **to, void **from, uint *ctrs, uint *fill_ctr, CommonOpts opts) {
+	uint i = threadIdx.x + blockIdx.x * blockDim.x;
+	if(opts.is_thread_inactive(i))
+		return;
+	uint nallocs = ctrs ? ctrs[i] : opts.nallocs;
+	uint pos = atomicAdd(fill_ctr, nallocs);
+	for(uint ialloc = 0; ialloc < nallocs; ialloc++)
+		to[pos + ialloc] = from[ialloc * opts.nthreads + i];
+}  // copy_cont_k
 
 /** a helper functor to check whether each pointer has enough room */
 struct has_enough_room {
@@ -367,24 +381,40 @@ struct check_tid {
 	__host__ __device__ bool operator()(int tid) {
 		return *(int *)d_ptrs[tid] == tid;
 	}
-}; 
+};
 
-bool check_alloc(void **d_ptrs, uint nptrs, const CommonOpts &opts) {
+bool check_alloc
+(void **d_ptrs, uint *d_ctrs, uint nptrs, const CommonOpts &opts) {
 	uint alloc_sz = opts.alloc_sz;
 	//uint period = opts.period();
-	if(!check_nz(d_ptrs, nptrs, opts)) {
+	if(!check_nz(d_ptrs, d_ctrs, nptrs, opts)) {
 		fprintf(stderr, "cannot allocate enough memory\n");
 		return false;
 	}
 	// first copy into a contiguous location
 	void **d_ptrs_cont = 0;
 	uint group = opts.group();
-	int nptrs_cont = opts.nptrs_cont(nptrs / opts.nallocs) * opts.nallocs;
+	int nptrs_cont;
+	if(d_ctrs) {
+		device_ptr<uint> dt_ctrs(d_ctrs);
+		nptrs_cont = reduce(dt_ctrs, dt_ctrs + nptrs, 0, plus<int>());
+	} else {
+		nptrs_cont = opts.nptrs_cont(nptrs / opts.nallocs) * opts.nallocs;
+	}
 	cucheck(cudaMalloc((void **)&d_ptrs_cont, nptrs_cont * sizeof(void *)));
+
+	uint *d_fill_ctr;
+	cucheck(cudaMalloc((void **)&d_fill_ctr, sizeof(uint)));
+	cucheck(cudaMemset(d_fill_ctr, 0, sizeof(uint)));
+	uint bs = 128;
+	copy_cont_k<<<divup(opts.nthreads, bs), bs>>>
+		(d_ptrs_cont, d_ptrs, d_ctrs, d_fill_ctr, opts);
+	cucheck(cudaGetLastError());
+	cucheck(cudaStreamSynchronize(0));
 	
-	transform
-		(counting_iterator<int>(0), counting_iterator<int>(nptrs_cont),
-		 device_ptr<void *>(d_ptrs_cont), copy_cont(d_ptrs, opts));
+	// transform
+	// 	(counting_iterator<int>(0), counting_iterator<int>(nptrs_cont),
+	// 	 device_ptr<void *>(d_ptrs_cont), copy_cont(d_ptrs_cont, d_ptrs, opts));
 	// sort the pointers
 	device_ptr<uint64> dt_ptrs((uint64 *)d_ptrs_cont);
 	sort(dt_ptrs, dt_ptrs + nptrs_cont);
@@ -397,7 +427,7 @@ bool check_alloc(void **d_ptrs, uint nptrs, const CommonOpts &opts) {
 	} 
 
 	// do write-read test to ensure there are no segfaults
-	int bs = 128;
+	//int bs = 128;
 	write_tid_k<<<divup(nptrs_cont, bs), bs>>>(d_ptrs_cont, nptrs_cont);
 	bool res = all_of(counting_iterator<int>(0), counting_iterator<int>(nptrs_cont), 
 								check_tid(d_ptrs_cont));

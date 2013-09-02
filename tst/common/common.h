@@ -30,6 +30,15 @@
 										 cudaMemcpyHostToDevice));									\
 }  // cuset
 
+/** gets the value of the CUDA device variable */
+#define cuget(pval, symbol)																\
+{																													\
+	void *cuget_addr;																				\
+	cucheck(cudaGetSymbolAddress(&cuget_addr, symbol));			\
+	cucheck(cudaMemcpy((pval), cuget_addr, sizeof(*(pval)), \
+										 cudaMemcpyDeviceToHost));						\
+}
+
 /** division with rounding upwards, useful for kernel calls */
 inline int divup(int a, int b) { return a / b + (a % b ? 1 : 0); }
 
@@ -53,6 +62,11 @@ typedef enum {
 	DistrNone = 0, DistrUniform, DistrExpUniform, DistrExpEqual, DistrTopNone
 } DistrType;
 
+/** allocation action */
+typedef enum {
+	ActionNone = 0, ActionAlloc, ActionFree
+} ActionType;
+
 #ifdef COMMONTEST_COMPILING
 #define COMMONTEST_EXTERN
 #else
@@ -67,25 +81,30 @@ static inline  __device__ uint drandom(void) {
 	uint tid = threadIdx.x + blockIdx.x * blockDim.x;
 	uint seed = random_states_g[tid];
 	// TODO: check if other advancements algorithms are faster
-	seed ^= (seed << 13);
+	/* seed ^= (seed << 13);
 	seed ^= (seed >> 17);
-	seed ^= (seed << 5);
-	/*
+	seed ^= (seed << 5); */
 	seed = (seed ^ 61) ^ (seed >> 16);
 	seed *= 9;
 	seed = seed ^ (seed >> 4);
 	seed *= 0x27d4eb2d;
 	seed = seed ^ (seed >> 15);
-	*/
 	random_states_g[tid] = seed;
 	return seed;
-}  // drandom()
+}  // drandom
 
 /** get the random value within the specified interval (both ends inclusive) on
 		the device */
 static inline __device__ uint drandom(uint a, uint b) {
 	return a + (drandom() & 0x00ffffffu) % (uint)(b - a + 1);
-}  // drandom()
+}  // drandom
+
+/** get the floating-point random value between 0 and 1 */
+static inline __device__ float drandomf(void) {
+	float f = 1.0f / (1024.0f * 1024.0f);
+	uint m = 1024 * 1024;
+	return f * drandom(0, m - 1);
+}  // drandomf
 
 /** common options for tests and allocator intiialization; note that some tests
 		are free to provide their own default settings */
@@ -93,11 +112,11 @@ struct CommonOpts {
 	/** default initialization for common options */
 	CommonOpts() 
 		: allocator(AllocatorHalloc), memory(512 * 1024 * 1024), 
-			halloc_fraction(0.75), busy_fraction(0.9), roomy_fraction(0.6),
+			halloc_fraction(0.75), busy_fraction(0.85), roomy_fraction(0.6),
 			sparse_fraction(0.05), sb_sz_sh(22), device(0), nthreads(1024 * 1024), 
 			ntries(8), alloc_sz(16), max_alloc_sz(16), nallocs(4), niters(1),
 			alloc_fraction(0.4), bs(128), period_mask(0), group_sh(0),
-			distr_type(DistrUniform){	
+			distr_type(DistrUniform), palloc(0.5), pfree(0.25) {
 		recompute_fields();
 	}
 	/** parses the options from command line, with the defaults specified; memory
@@ -153,8 +172,13 @@ struct CommonOpts {
 	/** group size for period; the "period" parameter is applied to groups, not
 	individual threads; -g */
 	int group_sh;
-	/** gets the allocation size distribution type */
+	/** gets the allocation size distribution type; -d */
 	DistrType distr_type;
+	/** allocation probability, ignored for non-probability tests; -p */
+	float palloc;
+	/** free probability, ignored for non-probability tests; palloc + pfree <= 1,
+	otherwise it's an error; -P */
+	float pfree;
 	/** gets the total number of allocations, as usually defined for tests; for
 	randomized tests, expectation is returned; individual tests may use their own
 	definition; -d */
@@ -235,13 +259,14 @@ void drandom_shutdown(const CommonOpts &opts);
 		@param d_ptrs device pointers
 		@param nptrs the number of pointers
  */
-bool check_nz(void **d_ptrs, uint nptrs, const CommonOpts &opts);
+bool check_nz(void **d_ptrs, uint *d_ctrs, uint nptrs, const CommonOpts &opts);
 
 /** checks that all allocations are made properly, i.e. that no pointer is zero,
 		and there's at least alloc_sz memory after each pointer (alloc_sz is the
 		same for all allocations). Parameters are mostly the same as with check_nz()
   */
-bool check_alloc(void **d_ptrs, uint nptrs, const CommonOpts &opts);
+bool check_alloc(void **d_ptrs, uint *d_ctrs, uint nptrs, 
+								 const CommonOpts &opts);
 
 #include "halloc-wrapper.h"
 #include "cuda-malloc-wrapper.h"

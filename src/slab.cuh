@@ -157,21 +157,23 @@ __device__ __forceinline__ void sb_ctr_dec(uint sb_id, uint nchunks) {
 			uint old_counter = sb_counter_dec(&sb_counters_g[sb_id], change);
 			if(!sb_is_head(old_counter)) {
 				uint size_id = sb_size_id(old_counter);
-				uint chunk_id = sb_chunk_id(old_counter);
 				// slab is non-head, so do manipulations
 				uint old_count = sb_count(old_counter), new_count = old_count - change;
 				uint roomy_threshold = size_infos_g[size_id].roomy_threshold;
-				uint sparse_threshold = size_infos_g[size_id].sparse_threshold;
 				if(new_count <= roomy_threshold && old_count > roomy_threshold) {
 					// mark superblock as roomy for current size
 					sbset_add_to(roomy_sbs_g[size_id], sb_id);
-				} else if(new_count <= sparse_threshold && 
-									old_count > sparse_threshold)	{
-					sbset_remove_from(roomy_sbs_g[size_id], sb_id);
-					sbset_add_to(sparse_sbs_g[chunk_id], sb_id);
-				}	else if(new_count == 0) {
-					sb_try_mark_free(sb_id, size_id, chunk_id, false);
-				}  // if(slab position in sets changes)
+				} else {
+					uint sparse_threshold = size_infos_g[size_id].sparse_threshold;
+					uint chunk_id = sb_chunk_id(old_counter);
+					if(new_count <= sparse_threshold && 
+						 old_count > sparse_threshold)	{
+						sbset_remove_from(roomy_sbs_g[size_id], sb_id);
+						sbset_add_to(sparse_sbs_g[chunk_id], sb_id);
+					}	else if(new_count == 0) {
+						sb_try_mark_free(sb_id, size_id, chunk_id, false);
+					}  // if(slab position in sets changes)
+				}
 			}  // if(not a head slab) 
 		} // if(leader lane)
 		want_inc = want_inc && !want_now;
@@ -292,6 +294,7 @@ __device__ __forceinline__ uint new_sb_for_size
 		uint new_head = SB_NONE;
 		//uint roomy_threshold = size_infos_g[size_id].roomy_threshold;
 		//uint sparse_threshold = size_infos_g[size_id].sparse_threshold;
+		//if(uc_cur_head == cur_head) 
 		if(cur_head == SB_NONE || 
 			 sb_count(*(volatile uint *)&sb_counters_g[cur_head]) >=
 			 size_infos_g[size_id].busy_threshold) {
@@ -308,6 +311,10 @@ __device__ __forceinline__ uint new_sb_for_size
 				// set the new head, so that allocations can continue
 				// TODO: check if this threadfence is necessary
 				//__threadfence();
+				// if(new_head != SB_NONE) {
+				//  	printf("new head = %d with count = %d\n", new_head, 
+				//  				 (uint)sb_count(sb_counters_g[new_head]));
+				// }
 				head_sbs_g[ihead][size_id] = new_head;
 				__threadfence();
 				// detach current head
@@ -325,7 +332,6 @@ __device__ __forceinline__ uint new_sb_for_size
 		unlock(&head_locks_g[ihead][size_id]);
 		//uint64 t2 = clock64();
 		//printf("needed %lld cycles to find new head slabs\n", t2 - t1);
-		//printf("new head = %d\n", new_head);
 		return new_head;
 	} else {
 		// someone else working on current head superblock; 
@@ -377,7 +383,7 @@ __device__ __forceinline__ void *sb_alloc_in
 				// memory was partially allocated, need to roll back
 				atomicAnd(block_bits + iword, ~alloc_mask | (old_word & alloc_mask));
 			}
-			if(itry > 0 && itry % CHECK_NTRIES == 0) {
+			if(itry % CHECK_NTRIES == CHECK_NTRIES - 1) {
 				// check the counter
 				uint count = sb_count(*(volatile uint *)&sb_counters_g[isb]);
 				if(count >= size_info->busy_threshold)

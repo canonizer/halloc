@@ -31,7 +31,7 @@
 #else
 #define NCOUNTERS MAX_NSIZES
 //#define NCOUNTERS 1
-#define COUNTER_FREQ (128 * 1024)
+#define COUNTER_FREQ (32 * 1024)
 #endif
 
 /** thread frequency for initial hashing */
@@ -126,7 +126,7 @@ __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
 	ichunk = ichunk * THREAD_FREQ;
 #endif
 	ichunk = ichunk * size_info->nchunks_in_block % size_info->nchunks;
-	//ichunk = ichunk * size_info->nchunks_in_block & (size_info->nchunks - 1);
+  //ichunk = ichunk * size_info->nchunks_in_block & (size_info->nchunks - 1);
 	// main allocation loop
 	bool want_alloc = true, need_roomy_sb = false;
 	// use two-level loop to avoid warplocks

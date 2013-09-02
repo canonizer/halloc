@@ -26,7 +26,7 @@ struct halloc_opts_t {
 	int sb_sz_sh;
 	/** default constructor which initializes the structure with default values */
 	halloc_opts_t(size_t memory = 512 * 1024 * 1024) : 
-		memory(memory), halloc_fraction(0.75), busy_fraction(0.9),
+		memory(memory), halloc_fraction(0.75), busy_fraction(0.85),
 		roomy_fraction(0.6), sparse_fraction(0.05), sb_sz_sh(22) 
 	{}
 };  // halloc_opts_t
