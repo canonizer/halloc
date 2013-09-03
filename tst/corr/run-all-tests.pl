@@ -19,7 +19,7 @@ sub runtest {
 # for each small size, and 12.5% memory for each large size
 $memory = 512 * 1024 * 1024;
 $step = 8;
-for($alloc_sz = 16; $alloc_sz <= 512 * 1024; $alloc_sz += $step) {
+for($alloc_sz = 16; $alloc_sz <= 32 * 1024; $alloc_sz += $step) {
 		$fraction = $alloc_sz <= 2 * 1024 ? 0.25 : 0.125;
 		$nthreads = floor($fraction * $memory / $alloc_sz);
 		if($nthreads == 0) {
@@ -46,7 +46,33 @@ for($alloc_sz = 16; $alloc_sz <= 512 * 1024; $alloc_sz += $step) {
 }  # for($step)
 
 # free slabs test - to ensure that slabs are freed correctly
-runtest("freeslabs", "-m$memory");
+# runtest("freeslabs", "-m$memory");
+
+# probabilitized tests
+$palloc = 0.75;
+$pfree = 0.75;
+foreach $group (1, 5) {
+		foreach $niters (1, 7) {
+				$ntries = $group == 1 ? 256 : 2048;
+				$ntries = ceil($ntries / $niters);
+				@fixed_args = ("prob-checkptr", "-i$niters", "-t$ntries", "-p$palloc",
+											 "-P$pfree", "-m$memory", "-g$group");
+				# small sizes (<= 64 bytes)
+				$nthreads = 1024 * 1024;
+				runtest(@fixed_args, "-l4", "-n$nthreads", "-s8", "-S64", "-duniform");
+				#runtest(@fixed_args, "-l4", "-n$nthreads", "-s8", "-S64", "-dexpequal");
+				# medium sizes (<= 256 bytes)
+				runtest(@fixed_args, "-l1", "-n$nthreads", "-s8", "-S256", "-duniform");
+				runtest(@fixed_args, "-l4", "-n$nthreads", "-s8", "-S256",
+								"-dexpequal");
+				# large-size test (<= 3072 bytes)				
+				$nthreads = 64 * 1024;
+				runtest(@fixed_args, "-l1", "-n$nthreads", "-s8", "-S3072", "-duniform");
+				$nthreads = 128 * 1024;
+				runtest(@fixed_args, "-l4", "-n$nthreads", "-s8", "-S3072",
+								"-dexpequal");
+		}
+}
 
 # print the total count
 $nfails = $ntests - $nsuccesses;

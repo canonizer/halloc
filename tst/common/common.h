@@ -116,7 +116,7 @@ struct CommonOpts {
 			sparse_fraction(0.05), sb_sz_sh(22), device(0), nthreads(1024 * 1024), 
 			ntries(8), alloc_sz(16), max_alloc_sz(16), nallocs(4), niters(1),
 			alloc_fraction(0.4), bs(128), period_mask(0), group_sh(0),
-			distr_type(DistrUniform), palloc(0.5), pfree(0.25) {
+			distr_type(DistrUniform), palloc(0.5), pfree(0.5) {
 		recompute_fields();
 	}
 	/** parses the options from command line, with the defaults specified; memory
@@ -265,7 +265,7 @@ bool check_nz(void **d_ptrs, uint *d_ctrs, uint nptrs, const CommonOpts &opts);
 		and there's at least alloc_sz memory after each pointer (alloc_sz is the
 		same for all allocations). Parameters are mostly the same as with check_nz()
   */
-bool check_alloc(void **d_ptrs, uint *d_ctrs, uint nptrs, 
+bool check_alloc(void **d_ptrs, uint *d_ctrs, uint nptrs,
 								 const CommonOpts &opts);
 
 #include "halloc-wrapper.h"

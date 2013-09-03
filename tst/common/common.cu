@@ -280,7 +280,8 @@ void CommonOpts::recompute_fields(void) {
 }  // recompute_fields
 
 void drandom_init(const CommonOpts &opts) {
-	srandom((uint)time(0));
+	//srandom((uint)time(0));
+	srandom(12345);
 
 	// TODO: somehow standardize this number
 	const uint MAX_NTHREADS = 8 * 1024 * 1024;
@@ -353,15 +354,21 @@ __global__ void copy_cont_k
 /** a helper functor to check whether each pointer has enough room */
 struct has_enough_room {
 	uint64 *d_ptrs;
-	size_t alloc_sz;
+	uint alloc_sz;
 	int nptrs;
 	__host__ __device__ has_enough_room
-	(uint64 *d_ptrs, size_t alloc_sz, int	nptrs) 
+	(uint64 *d_ptrs, uint alloc_sz, int	nptrs) 
 		: d_ptrs(d_ptrs), alloc_sz(alloc_sz), nptrs(nptrs) {}
 	__host__ __device__ bool operator()(int i) {
 		if(i == nptrs - 1)
 			return true;
-		return d_ptrs[i] + alloc_sz <= d_ptrs[i + 1];
+		uint sz = alloc_sz ? alloc_sz : *(uint *)(void *)d_ptrs[i];
+		bool res = d_ptrs[i] + sz <= d_ptrs[i + 1];
+		// if(!res) {
+		// 	printf("ptrs[%d] = %llx, sz = %d, ptrs[%d] = %llx\n", i, d_ptrs[i], sz, 
+		// 				 i + 1, d_ptrs[i + 1]);
+		// }
+		return res;
 	}
 };  // has_enough_room
 
@@ -386,21 +393,27 @@ struct check_tid {
 bool check_alloc
 (void **d_ptrs, uint *d_ctrs, uint nptrs, const CommonOpts &opts) {
 	uint alloc_sz = opts.alloc_sz;
+	if(opts.alloc_sz != opts.max_alloc_sz)
+		alloc_sz = 0;
 	//uint period = opts.period();
 	if(!check_nz(d_ptrs, d_ctrs, nptrs, opts)) {
 		fprintf(stderr, "cannot allocate enough memory\n");
 		return false;
 	}
 	// first copy into a contiguous location
-	void **d_ptrs_cont = 0;
 	uint group = opts.group();
-	int nptrs_cont;
+	int nptrs_cont = 0;
 	if(d_ctrs) {
 		device_ptr<uint> dt_ctrs(d_ctrs);
-		nptrs_cont = reduce(dt_ctrs, dt_ctrs + nptrs, 0, plus<int>());
+		nptrs_cont = reduce(dt_ctrs, dt_ctrs + opts.nthreads, 0, plus<uint>());
+		//printf("contiguous number of pointers = %d\n", nptrs_cont);
 	} else {
 		nptrs_cont = opts.nptrs_cont(nptrs / opts.nallocs) * opts.nallocs;
 	}
+	// check if there are any pointers at all
+	if(nptrs_cont == 0)
+		return true;
+	void **d_ptrs_cont = 0;
 	cucheck(cudaMalloc((void **)&d_ptrs_cont, nptrs_cont * sizeof(void *)));
 
 	uint *d_fill_ctr;
@@ -419,18 +432,23 @@ bool check_alloc
 	device_ptr<uint64> dt_ptrs((uint64 *)d_ptrs_cont);
 	sort(dt_ptrs, dt_ptrs + nptrs_cont);
 	// check whether each pointer has enough room
-	if(!all_of(counting_iterator<int>(0), counting_iterator<int>(nptrs_cont), 
+	if(!all_of(counting_iterator<int>(0), counting_iterator<int>(nptrs_cont),
 						 has_enough_room((uint64 *)d_ptrs_cont, alloc_sz, nptrs_cont))) {
 		fprintf(stderr, "allocated pointers do not have enough room\n");
 		cucheck(cudaFree(d_ptrs_cont));
 		return false;
 	} 
 
+	// writes and reads have already been performed with the pointers, so just
+	// ignore this part
 	// do write-read test to ensure there are no segfaults
-	//int bs = 128;
-	write_tid_k<<<divup(nptrs_cont, bs), bs>>>(d_ptrs_cont, nptrs_cont);
-	bool res = all_of(counting_iterator<int>(0), counting_iterator<int>(nptrs_cont), 
-								check_tid(d_ptrs_cont));
+	// write_tid_k<<<divup(nptrs_cont, bs), bs>>>(d_ptrs_cont, nptrs_cont);
+	// cucheck(cudaGetLastError());
+	// cucheck(cudaStreamSynchronize(0));
+	// bool res = all_of(counting_iterator<int>(0), counting_iterator<int>(nptrs_cont), 
+	// 							check_tid(d_ptrs_cont));
+	bool res = true;
 	cucheck(cudaFree(d_ptrs_cont));
+	cucheck(cudaFree(d_fill_ctr));
 	return res;
 }  // check_alloc

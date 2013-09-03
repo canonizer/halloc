@@ -42,7 +42,7 @@ typedef struct {
 #define SB_FREE_STEP 2048
 /** maximum number of tries inside a superblock after which the allocation
 		attempt is abandoned */
-#define MAX_NTRIES 128
+#define MAX_NTRIES 256
 /** the number of steps after which count check needs be peformed, to ensure
 		that the allocator is not searching in a block that is already full */
 #define CHECK_NTRIES 8

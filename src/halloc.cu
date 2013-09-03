@@ -66,20 +66,20 @@ __device__ __forceinline__ uint size_ctr_inc(uint size_id) {
 	bool want_inc = true;
 	uint mask, old_counter, lid = lane_id(), leader_lid, group_mask, change;
 	//uint change = 1;
-	//while(mask = __ballot(want_inc)) {
-	//	if(want_inc) {
-	mask = __ballot(1);
-	while(want_inc) {
-		//mask = __ballot(want_inc);
-		leader_lid = warp_leader(mask);
-		uint leader_size_id = size_id;
-		leader_size_id = __shfl((int)leader_size_id, leader_lid);
-		group_mask = __ballot(size_id == leader_size_id);
-		if(lid == leader_lid)
-			old_counter = atomicAdd(&counters_g[size_id], __popc(group_mask));
-		mask &= ~group_mask;
-		want_inc = want_inc && size_id != leader_size_id;
-		//	}
+	while(mask = __ballot(want_inc)) {
+		if(want_inc) {
+			//mask = __ballot(1);
+			//while(want_inc) {
+			//mask = __ballot(want_inc);
+			leader_lid = warp_leader(mask);
+			uint leader_size_id = size_id;
+			leader_size_id = __shfl((int)leader_size_id, leader_lid);
+			group_mask = __ballot(size_id == leader_size_id);
+			if(lid == leader_lid)
+				old_counter = atomicAdd(&counters_g[size_id], __popc(group_mask));
+			mask &= ~group_mask;
+			want_inc = want_inc && size_id != leader_size_id;
+		}
 	}  // while
 	old_counter = __shfl((int)old_counter, leader_lid);
 	change =  __popc(group_mask & ((1 << lid) - 1));
@@ -154,6 +154,7 @@ __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
 			}  // while(need new head superblock)
 		}
 	} while(__any(want_alloc));
+	//__threadfence();
 	return p;
 }  // hamalloc_small
 

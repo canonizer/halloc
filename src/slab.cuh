@@ -47,6 +47,8 @@ __device__ inline uint *sb_alloc_sizes(uint sb) {
 	return alloc_sizes_g + sb * nsb_alloc_words_g;
 }
 
+__device__ uint dummy_g;
+
 /** sets allocation size for the allocation 
 		@param alloc_words allocation data for this superblock
 		@param ichunk the first allocated chunk
@@ -57,7 +59,9 @@ __device__ inline void sb_set_alloc_size
 (uint *alloc_words, uint ichunk, uint	nchunks) {
 	uint iword = ichunk / 4, ibyte = ichunk % 4, shift = ibyte * 8;
 	uint mask = nchunks << shift;
+	//dummy_g += atomicOr(&alloc_words[iword], mask);
 	atomicOr(&alloc_words[iword], mask);
+	//assert(res == 0);
 	//uint mask = (size_id << shift) | (~0 ^ (0xfu << shift));
 	//atomicAnd(&alloc_words[iword], mask);
 }  // sb_set_alloc_size
@@ -109,22 +113,21 @@ __device__ __forceinline__ uint sb_ctr_inc
 	bool want_inc = true;
 	uint mask, old_counter, lid = lane_id(), leader_lid;
 	uint change;
-	//while(mask = __ballot(want_inc)) {
-	//	if(want_inc) {
-	//mask = __ballot(1);
-	while(want_inc) {
-		mask = __ballot(1);
-		leader_lid = warp_leader(mask);
-		uint leader_sb_id = sb_id;
-		leader_sb_id = __shfl((int)leader_sb_id, leader_lid);
-		// allocation size is same for all superblocks
-		uint group_mask = __ballot(sb_id == leader_sb_id);
-		change = nchunks * __popc(group_mask);
-		if(lid == leader_lid)
-			old_counter = sb_counter_inc(&sb_counters_g[sb_id], change);
-		//mask &= ~group_mask;
-		want_inc = want_inc && sb_id != leader_sb_id;
-		//	}
+	while(mask = __ballot(want_inc)) {
+		if(want_inc) {
+			//while(want_inc) {
+			//mask = __ballot(1);
+			leader_lid = warp_leader(mask);
+			uint leader_sb_id = sb_id;
+			leader_sb_id = __shfl((int)leader_sb_id, leader_lid);
+			// allocation size is same for all superblocks
+			uint group_mask = __ballot(sb_id == leader_sb_id);
+			change = nchunks * __popc(group_mask);
+			if(lid == leader_lid)
+				old_counter = sb_counter_inc(&sb_counters_g[sb_id], change);
+			//mask &= ~group_mask;
+			want_inc = want_inc && sb_id != leader_sb_id;
+		}
 	}  // while
 	old_counter = __shfl((int)old_counter, leader_lid);
 	if(sb_chunk_id(old_counter) != chunk_id)
@@ -246,7 +249,7 @@ __device__ __forceinline__ uint find_sb_for_size(uint size_id, uint chunk_id) {
 			} else {
 				// almost there, but still need to set size
 				// TODO: check that this causes no race conditions
-				uint old_size_id = sb_size_id(old_counter) & ((1 << SB_SIZE_POS) - 1);
+				uint old_size_id = sb_size_id(old_counter) & ((1 << SB_SIZE_SZ) - 1);
 				atomicXor(&sb_counters_g[new_head], old_size_id ^ size_id);
 				*(volatile uint *)&sbs_g[new_head].size_id = size_id;
 				break;
@@ -268,8 +271,12 @@ __device__ __forceinline__ uint find_sb_for_size(uint size_id, uint chunk_id) {
 			// there may be others trying to set the head; as they come from
 			// roomy blocks, they will fail; also, there may be some ongoing
 			// allocation attempts, so just wait
+			//printf("waiting for slab %d to be fully free\n", new_head);
 			while(atomicCAS(&sb_counters_g[new_head], old_counter, new_counter) !=
-						old_counter);
+			 			old_counter);
+			//assert(atomicCAS(&sb_counters_g[new_head], old_counter, new_counter) ==
+			//			old_counter);
+			//printf("the slab %d is free\n", new_head);
 			//atomicCAS(&sb_counters_g[new_head], old_counter, new_counter);
 		}  // if(got new head from free slabs)
 	}
@@ -315,7 +322,8 @@ __device__ __forceinline__ uint new_sb_for_size
 				//  	printf("new head = %d with count = %d\n", new_head, 
 				//  				 (uint)sb_count(sb_counters_g[new_head]));
 				// }
-				head_sbs_g[ihead][size_id] = new_head;
+				__threadfence();
+				*(volatile uint *)&head_sbs_g[ihead][size_id] = new_head;
 				__threadfence();
 				// detach current head
 				if(cur_head != SB_NONE)
