@@ -87,7 +87,7 @@ public:
 
 		// do testing
 		for(int itry = 0; itry < opts.ntries; itry++) {
-			//printf("iteration %d\n", itry);
+			printf("iteration %d\n", itry);
 			// run the kernel
 			//printf("kernel configuration: %d, %d\n", grid, bs);
 			prob_corr_k<T> <<<grid, bs>>>(opts, d_ptrs, d_ctrs);
@@ -101,7 +101,7 @@ public:
 		}  // for(itry)
 
 		// free the rest
-		//printf("freeing the rest\n");
+		printf("freeing the rest\n");
 		free_rest_k<T> <<<grid, bs>>> (opts, d_ptrs, d_ctrs);
 		cucheck(cudaGetLastError());
 		cucheck(cudaStreamSynchronize(0));

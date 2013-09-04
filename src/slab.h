@@ -42,7 +42,7 @@ typedef struct {
 #define SB_FREE_STEP 2048
 /** maximum number of tries inside a superblock after which the allocation
 		attempt is abandoned */
-#define MAX_NTRIES 256
+#define MAX_NTRIES 128
 /** the number of steps after which count check needs be peformed, to ensure
 		that the allocator is not searching in a block that is already full */
 #define CHECK_NTRIES 8
@@ -54,14 +54,19 @@ typedef struct {
 #define CACHE_HEAD_SBS 1
 
 /** positions and sizes related to slab counters */
+// modified values enable better reading of counters in hex
 #define SB_SIZE_POS 0
-#define SB_SIZE_SZ 6
-#define SB_CHUNK_POS 6
+//#define SB_SIZE_SZ 6
+#define SB_SIZE_SZ 5
+//#define SB_CHUNK_POS 6
+#define SB_CHUNK_POS 5
 #define SB_CHUNK_SZ 3
-#define SB_HEAD_POS 9
+//#define SB_HEAD_POS 9
+#define SB_HEAD_POS 8
 #define SB_HEAD_SZ 1
-#define SB_COUNT_POS 10
-#define SB_COUNT_SZ 22
+//#define SB_COUNT_POS 10
+#define SB_COUNT_POS 12
+#define SB_COUNT_SZ 20
 
 // functions for manipulation with counter values
 /** gets slab allocation count */

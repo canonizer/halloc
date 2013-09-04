@@ -6,9 +6,11 @@ use POSIX;
 
 $ntests = 0;
 $nsuccesses = 0;
+$device = 1;
+$memory = 512 * 1024 * 1024;
 
 sub runtest {
-		system("./run-test.sh", @_);
+		system("./run-test.sh", @_, "-D$device", "-m$memory");
 		if($? >> 8 == 0) {
 				$nsuccesses++;
 		}				
@@ -17,7 +19,6 @@ sub runtest {
 
 # correctness memory allocation test; over all sizes, allocate/free 25% memory
 # for each small size, and 12.5% memory for each large size
-$memory = 512 * 1024 * 1024;
 $step = 8;
 for($alloc_sz = 16; $alloc_sz <= 32 * 1024; $alloc_sz += $step) {
 		$fraction = $alloc_sz <= 2 * 1024 ? 0.25 : 0.125;
@@ -25,8 +26,7 @@ for($alloc_sz = 16; $alloc_sz <= 32 * 1024; $alloc_sz += $step) {
 		if($nthreads == 0) {
 				next;
 		}
-		runtest("checkptr", "-l1", "-t4", "-m$memory", "-s$alloc_sz", 
-						"-n$nthreads");
+		runtest("checkptr", "-l1", "-t4", "-s$alloc_sz", "-n$nthreads");
 		# modify step
 		if($alloc_sz >= 1024 * 1024) {
 				$step = 1024 * 1024;
@@ -53,10 +53,11 @@ $palloc = 0.75;
 $pfree = 0.75;
 foreach $group (1, 5) {
 		foreach $niters (1, 7) {
-				$ntries = $group == 1 ? 256 : 2048;
+#		foreach $niters (7) {
+				$ntries = $group == 1 ? 512 : 8192;
 				$ntries = ceil($ntries / $niters);
 				@fixed_args = ("prob-checkptr", "-i$niters", "-t$ntries", "-p$palloc",
-											 "-P$pfree", "-m$memory", "-g$group");
+											 "-P$pfree", "-g$group");
 				# small sizes (<= 64 bytes)
 				$nthreads = 1024 * 1024;
 				runtest(@fixed_args, "-l4", "-n$nthreads", "-s8", "-S64", "-duniform");

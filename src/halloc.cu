@@ -35,6 +35,7 @@
 #endif
 
 /** thread frequency for initial hashing */
+//#define THREAD_FREQ 11
 #define THREAD_FREQ 11
 /** allocation counter increment */
 #define COUNTER_INC 1
@@ -66,20 +67,20 @@ __device__ __forceinline__ uint size_ctr_inc(uint size_id) {
 	bool want_inc = true;
 	uint mask, old_counter, lid = lane_id(), leader_lid, group_mask, change;
 	//uint change = 1;
-	while(mask = __ballot(want_inc)) {
-		if(want_inc) {
-			//mask = __ballot(1);
-			//while(want_inc) {
-			//mask = __ballot(want_inc);
-			leader_lid = warp_leader(mask);
-			uint leader_size_id = size_id;
-			leader_size_id = __shfl((int)leader_size_id, leader_lid);
-			group_mask = __ballot(size_id == leader_size_id);
-			if(lid == leader_lid)
-				old_counter = atomicAdd(&counters_g[size_id], __popc(group_mask));
-			mask &= ~group_mask;
-			want_inc = want_inc && size_id != leader_size_id;
-		}
+	//while(mask = __ballot(want_inc)) {
+	//	if(want_inc) {
+	//mask = __ballot(1);
+	while(want_inc) {
+		mask = __ballot(want_inc);
+		leader_lid = warp_leader(mask);
+		uint leader_size_id = size_id;
+		leader_size_id = __shfl((int)leader_size_id, leader_lid);
+		group_mask = __ballot(size_id == leader_size_id);
+		if(lid == leader_lid)
+			old_counter = atomicAdd(&counters_g[size_id], __popc(group_mask));
+		mask &= ~group_mask;
+		want_inc = want_inc && size_id != leader_size_id;
+		// }
 	}  // while
 	old_counter = __shfl((int)old_counter, leader_lid);
 	change =  __popc(group_mask & ((1 << lid) - 1));
@@ -130,28 +131,41 @@ __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
 	// main allocation loop
 	bool want_alloc = true, need_roomy_sb = false;
 	// use two-level loop to avoid warplocks
+	//uint ntries = 0;
 	do {
 		if(want_alloc) {
 			// try allocating in head superblock
 			//head_sb = head_sbs_g[size_id];
 			p = sb_alloc_in(ihead, head_sb, ichunk, size_id, need_roomy_sb);
 			want_alloc = !p;
+			//assert(!want_alloc || need_roomy_sb);
 			while(__any(need_roomy_sb)) {
 				uint need_roomy_mask = __ballot(need_roomy_sb);
 				if(need_roomy_sb) {
 					leader_lid = warp_leader(need_roomy_mask);
-					uint leader_size_id = __shfl((int)size_id, leader_lid);
+					uint leader_size_id = size_id;
+					leader_size_id = __shfl((int)leader_size_id, leader_lid);
 					// here try to check whether a new SB is really needed, and get the
 					// new SB
-					if(lid == leader_lid)
-						head_sb = new_sb_for_size(size_id, size_info->chunk_id, ihead);
+					uint new_head_sb;
+					if(lid == leader_lid) {
+						//assert(!forced);
+						//if(forced)
+						//	printf("forced detaching head slab %d\n", head_sb);
+						new_head_sb = new_sb_for_size(size_id, size_info->chunk_id, ihead);
+					}
 					if(size_id == leader_size_id) {
-						head_sb = __shfl((int)head_sb, leader_lid);
+						new_head_sb = __shfl((int)new_head_sb, leader_lid);
+						//if(new_head_sb != head_sb)
+						//	ntries = 0;
+						head_sb = new_head_sb;
 						want_alloc = want_alloc && head_sb != SB_NONE;
 						need_roomy_sb = false;
 					}
 				}
 			}  // while(need new head superblock)
+			//ntries++;
+			//assert(ntries < 256);
 		}
 	} while(__any(want_alloc));
 	//__threadfence();

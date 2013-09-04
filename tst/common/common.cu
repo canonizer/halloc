@@ -280,8 +280,8 @@ void CommonOpts::recompute_fields(void) {
 }  // recompute_fields
 
 void drandom_init(const CommonOpts &opts) {
-	//srandom((uint)time(0));
-	srandom(12345);
+	srandom((uint)time(0));
+	//srandom(12345);
 
 	// TODO: somehow standardize this number
 	const uint MAX_NTHREADS = 8 * 1024 * 1024;
