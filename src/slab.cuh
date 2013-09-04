@@ -13,10 +13,13 @@ __constant__ uint nsb_bit_words_sh_g;
 /** number of alloc sizes per superblock */
 __constant__ uint nsb_alloc_words_g;
 
-/** superblock descriptors */
+/** slab descriptors */
 __device__ superblock_t sbs_g[MAX_NSBS];
-/** superblock's (non-distributed) counters */
+/** slab (non-distributed) counters */
 __device__ uint sb_counters_g[MAX_NSBS];
+/** slab locks; acquiring lock required to modify the lower part 
+		of the counter */
+__device__ uint sb_locks_g[MAX_NSBS];
 
 /** the set of all unallocated slabs */
 __device__ sbset_t unallocated_sbs_g;
@@ -34,6 +37,9 @@ __device__ volatile uint cached_sbs_g[NHEADS][MAX_NSIZES];
 /** superblock operation locks per size */
 __device__ uint head_locks_g[NHEADS][MAX_NSIZES];
 
+/** a dummy variable to confuse the compiler in some cases */
+__device__ uint dummy_g;
+
 /** gets block bits for superblock */
 __device__ inline uint *sb_block_bits(uint sb) {
 	// TODO: use a shift constant
@@ -47,8 +53,6 @@ __device__ inline uint *sb_alloc_sizes(uint sb) {
 	return alloc_sizes_g + sb * nsb_alloc_words_g;
 }
 
-__device__ uint dummy_g;
-
 /** sets allocation size for the allocation 
 		@param alloc_words allocation data for this superblock
 		@param ichunk the first allocated chunk
@@ -59,10 +63,7 @@ __device__ inline void sb_set_alloc_size
 (uint *alloc_words, uint ichunk, uint	nchunks) {
 	uint iword = ichunk / 4, ibyte = ichunk % 4, shift = ibyte * 8;
 	uint mask = nchunks << shift;
-	//dummy_g += atomicOr(&alloc_words[iword], mask);
 	atomicOr(&alloc_words[iword], mask);
-	//uint mask = (size_id << shift) | (~0 ^ (0xfu << shift));
-	//atomicAnd(&alloc_words[iword], mask);
 }  // sb_set_alloc_size
 
 /** gets (and resets) allocation size for the allocation 
@@ -72,34 +73,33 @@ __device__ inline uint sb_get_reset_alloc_size(uint *alloc_words, uint ichunk) {
 	uint iword = ichunk / 4, ibyte = ichunk % 4, shift = ibyte * 8;
 	uint mask = ~(0xf << shift);
 	return (atomicAnd(&alloc_words[iword], mask) >> shift) & 0xfu;
-	//uint mask = 0xfu << shift;
-	//return (atomicOr(&alloc_words[iword], mask) >> shift) & 0xfu;
 }  // sb_get_reset_alloc_size
 
-/** tries to mark a slab as free 
+/** tries to mark a slab as free; can only be performed when slab is locked
 		@param from_head whether there's a try to mark slab as free during detaching
 		from head (this is very unlikely)
  */
 __device__ inline void sb_try_mark_free
 (uint sb, uint size_id, uint chunk_id, bool from_head) {
-	// try marking slab as free
-	uint old_counter = sb_counter_val(0, false, chunk_id, size_id);
-	uint new_counter = sb_counter_val(0, false, SZ_NONE, SZ_NONE);
-	if(atomicCAS(&sb_counters_g[sb], old_counter, new_counter) == old_counter) {
-		//if(atomicAdd(&sb_counters_g[sb], new_counter - old_counter) == old_counter) {
-		//printf("slab %d free, ctr = %x\n", sb, old_counter);
-		// slab marked as free, remove it from roomy and add to free
-		if(!from_head)
-			sbset_remove_from(sparse_sbs_g[chunk_id], sb);
-		sbs_g[sb].size_id = SZ_NONE;
-		sbs_g[sb].chunk_sz = 0;
-		sbset_add_to(free_sbs_g, sb);
-	} else if(from_head) {
-		// TODO: also check for adding to sparse slabs
-		// add it to non-free
-		//atomicSub(&sb_counters_g[sb], new_counter - old_counter);
+	// do nothing if it is head or chunk id is unset
+	if(sbs_g[sb].is_head || chunk_id == SZ_NONE)
+		return;
+	uint old_counter;
+	do {
+		old_counter = sb_reset_chunk(&sb_counters_g[sb], chunk_id);
+		if(sb_count(old_counter) == 0) {
+			if(!from_head)
+				sbset_remove_from(sparse_sbs_g[chunk_id], sb);
+			sbs_g[sb].size_id = SZ_NONE;
+			sbs_g[sb].chunk_id = SZ_NONE;
+			sbs_g[sb].chunk_sz = 0;
+			sbset_add_to(free_sbs_g, sb);
+			return;
+		}
+	} while(sb_count(sb_set_chunk(&sb_counters_g[sb], chunk_id)) == 0);
+	// add somewhere if detaching from head
+	if(from_head)
 		sbset_add_to(roomy_sbs_g[size_id], sb);
-	}
 }  // sb_try_mark_free
 
 /** increment the non-distributed counter of the superblock 
@@ -161,23 +161,34 @@ __device__ __forceinline__ void sb_ctr_dec(uint sb_id, uint nchunks) {
 		if(lid == leader_lid) {
 			uint old_counter = sb_counter_dec(&sb_counters_g[sb_id], change);
 			if(!sb_is_head(old_counter)) {
-				uint size_id = sb_size_id(old_counter);
-				// slab is non-head, so do manipulations
-				uint old_count = sb_count(old_counter), new_count = old_count - change;
-				uint roomy_threshold = size_infos_g[size_id].roomy_threshold;
-				if(new_count <= roomy_threshold && old_count > roomy_threshold) {
-					// mark superblock as roomy for current size
-					sbset_add_to(roomy_sbs_g[size_id], sb_id);
-				} else {
-					uint sparse_threshold = size_infos_g[size_id].sparse_threshold;
-					uint chunk_id = sb_chunk_id(old_counter);
-					if(new_count <= sparse_threshold && 
-						 old_count > sparse_threshold)	{
-						sbset_remove_from(roomy_sbs_g[size_id], sb_id);
-						sbset_add_to(sparse_sbs_g[chunk_id], sb_id);
-					}	else if(new_count == 0) {
-						sb_try_mark_free(sb_id, size_id, chunk_id, false);
-					}  // if(slab position in sets changes)
+				//uint size_id = sb_size_id(old_counter);
+				uint size_id = sbs_g[sb_id].size_id;
+				uint chunk_id = sbs_g[sb_id].chunk_id;
+				if(size_id != SZ_NONE && chunk_id != SZ_NONE) {
+					// slab is non-head, so do manipulations
+					uint old_count = sb_count(old_counter), new_count = old_count - change;
+					uint roomy_threshold = size_infos_g[size_id].roomy_threshold;
+					if(new_count <= roomy_threshold && old_count > roomy_threshold) {
+						// mark superblock as roomy for current size
+						sbset_add_to(roomy_sbs_g[size_id], sb_id);
+					} else {
+						uint sparse_threshold = size_infos_g[size_id].sparse_threshold;
+						//uint chunk_id = sb_chunk_id(old_counter);
+						if(new_count <= sparse_threshold && 
+							 old_count > sparse_threshold)	{
+							sbset_remove_from(roomy_sbs_g[size_id], sb_id);
+							sbset_add_to(sparse_sbs_g[chunk_id], sb_id);
+						}	else if(new_count == 0) {
+							if(sb_chunk_id(old_counter) != (SZ_NONE & ((1 << SB_CHUNK_SZ) - 1))) {
+								lock(&sb_locks_g[sb_id]);
+								// read size_id and chunk_id anew
+								size_id = *(volatile uint *)&sbs_g[sb_id].size_id;
+								chunk_id = *(volatile uint *)&sbs_g[sb_id].chunk_id;
+								sb_try_mark_free(sb_id, size_id, chunk_id, false);
+								unlock(&sb_locks_g[sb_id]);
+							}
+						}  // if(slab position in sets changes)
+					}
 				}
 			}  // if(not a head slab) 
 		} // if(leader lane)
@@ -187,32 +198,29 @@ __device__ __forceinline__ void sb_ctr_dec(uint sb_id, uint nchunks) {
 
 /** detaches the specified head slab */
 __device__ __forceinline__ void detach_head(uint head) {
-	uint old_counter = atomicAnd(&sb_counters_g[head], 
-															 ~(1 << SB_HEAD_POS));
+	// uint old_counter = atomicAnd(&sb_counters_g[head], 
+	// 														 ~(1 << SB_HEAD_POS));
+	sbs_g[head].is_head = false;
+	uint old_counter = sb_reset_head(&sb_counters_g[head]);
 	uint count = sb_count(old_counter);
-	uint size_id = sb_size_id(old_counter);
-	// TODO: specialize for head detachment vs. stale search metadata; this
-	// conditional is only necessary in the latter case
-	if(size_id == (SZ_NONE & ((1 << SB_SIZE_SZ) - 1))) {
-		// unconditionally add to free		
-		//printf("unconditionally adding slab %d to free\n", head);
-		sbset_add_to(free_sbs_g, head);
-	} else {
-		uint roomy_threshold = size_infos_g[size_id].roomy_threshold;
-		if(count <= roomy_threshold) {
-			uint chunk_id = sb_chunk_id(old_counter);
-			if(count == 0) {
-				sb_try_mark_free(head, size_id, chunk_id, true);
+	//uint size_id = sb_size_id(old_counter);
+	uint size_id = sbs_g[head].size_id;
+	uint roomy_threshold = size_infos_g[size_id].roomy_threshold;
+	if(count <= roomy_threshold) {
+		//uint chunk_id = sb_chunk_id(old_counter);
+		uint chunk_id = sbs_g[head].chunk_id;
+		if(count == 0) {
+			sb_try_mark_free(head, size_id, chunk_id, true);
+		} else {
+			uint sparse_threshold = size_infos_g[chunk_id].sparse_threshold;
+			if(count <= sparse_threshold) {
+				sbset_add_to(sparse_sbs_g[chunk_id], head);
 			} else {
-				uint sparse_threshold = size_infos_g[chunk_id].sparse_threshold;
-				if(count <= sparse_threshold) {
-					sbset_add_to(sparse_sbs_g[chunk_id], head);
-				} else {
-					sbset_add_to(roomy_sbs_g[size_id], head);
-				}
-			}  // if(free)
-		}  // if(at least roomy)
-	}  // if(size_id == SZ_NONE)
+				sbset_add_to(roomy_sbs_g[size_id], head);
+			}
+		}  // if(free)
+	}  // if(at least roomy)
+
 }  // detach_head
 
 /** finds a suitable new slab for size and just returns it, without modifying
@@ -225,15 +233,17 @@ __device__ __forceinline__ uint find_sb_for_size(uint size_id, uint chunk_id) {
 	// first try among roomy sb's of current size
 	while((new_head = sbset_get_from(roomy_sbs_g[size_id])) != SB_NONE) {
 		// try set head
-		uint old_counter = atomicOr(&sb_counters_g[new_head], 1 << SB_HEAD_POS);
-		if(sb_is_head(old_counter)) { 
-		} else if(sb_size_id(old_counter) != size_id) {
-			//							|| sb_count(old_counter) > size_infos_g[size_id].roomy_threshold) {
-			// drop the block and go for another
-			// TODO: process this as another head detachment
-			//atomicAnd(&sb_counters_g[new_head], ~(1 << SB_HEAD_POS));
-			detach_head(new_head);
-		} else
+		lock(&sb_locks_g[new_head]);
+		bool found = false;
+		if(!sbs_g[new_head].is_head && sbs_g[new_head].size_id == size_id) {
+			found = true;
+			*(volatile bool *)&sbs_g[new_head].is_head = true;
+			// ensure that the counter is updated
+			if(!sb_set_head(&sb_counters_g[new_head]))
+				dummy_g = 1;
+		}
+		unlock(&sb_locks_g[new_head]);
+		if(found)
 			break;
 	}  // while(searching through new heads)
 
@@ -241,24 +251,21 @@ __device__ __forceinline__ uint find_sb_for_size(uint size_id, uint chunk_id) {
 	if(new_head == SB_NONE) {
 		while((new_head = sbset_get_from(sparse_sbs_g[chunk_id])) != SB_NONE) {
 			// try set head
-			uint old_counter = atomicOr(&sb_counters_g[new_head], 1 << SB_HEAD_POS);
-			if(sb_is_head(old_counter)) { 
-			} else if(sb_chunk_id(old_counter) != chunk_id) {
-								// || sb_count(old_counter) > size_infos_g[size_id].sparse_threshold) {
-				// drop the block and go for another
-				// TODO: process this as another head detachment
-				//atomicAnd(&sb_counters_g[new_head], ~(1 << SB_HEAD_POS));
-				detach_head(new_head);
-			} else {
-				// almost there, but still need to set size
-				// TODO: check that this causes no race conditions
-				uint old_size_id = sb_size_id(old_counter) & ((1 << SB_SIZE_SZ) - 1);
-				atomicXor(&sb_counters_g[new_head], old_size_id ^ size_id);
+			lock(&sb_locks_g[new_head]);
+			bool found = false;
+			if(!sbs_g[new_head].is_head && sbs_g[new_head].chunk_id == chunk_id) {
+				found = true;
+				*(volatile bool *)&sbs_g[new_head].is_head = true;
 				*(volatile uint *)&sbs_g[new_head].size_id = size_id;
-				break;
+				// ensure that the counter is updated
+				if(!sb_set_head(&sb_counters_g[new_head]))
+					dummy_g = 1;
 			}
+			unlock(&sb_locks_g[new_head]);
+			if(found)
+				break;
 		}  // while(searching through new heads)
-	}
+	}  // if(found nothing yet)
 
 	// try getting from free slabs; hear actually getting one 
 	// always means success, as only truly free block get to this bit array
@@ -266,28 +273,28 @@ __device__ __forceinline__ uint find_sb_for_size(uint size_id, uint chunk_id) {
 		while((new_head = sbset_get_from(free_sbs_g)) != SB_NONE) {
 			//if(new_head != SB_NONE) {
 			// fill in the slab
-			uint old_counter = sb_counter_val(0, false, SZ_NONE, SZ_NONE);
-			uint new_counter = sb_counter_val(0, true, chunk_id, size_id);
-			// there may be others trying to set the head; as they come from
-			// roomy blocks, they will fail; also, there may be some ongoing
-			// allocation attempts, so just wait
-			//printf("waiting for slab %d to be fully free\n", new_head);
-			uint real_old_counter;
-			if((real_old_counter = atomicCAS
-					(&sb_counters_g[new_head], old_counter, new_counter)) ==
-				 old_counter) {
+			lock(&sb_locks_g[new_head]);
+			bool found = false;			
+			if(!sbs_g[new_head].is_head && sbs_g[new_head].chunk_id == SZ_NONE && 
+				 sbs_g[new_head].size_id == SZ_NONE) {
+				found = true;
+				*(volatile bool *)&sbs_g[new_head].is_head = true;
 				*(volatile uint *)&sbs_g[new_head].size_id = size_id;
+				*(volatile uint *)&sbs_g[new_head].chunk_id = chunk_id;
 				*(volatile uint *)&sbs_g[new_head].chunk_sz = 
 					size_infos_g[size_id].chunk_sz;
-				break;
-			} else {
-				//printf("cannot get free block %d, counter %x\n", new_head, real_old_counter);
+				// ensure that the counter is updated
+				// TODO: pack both updates into one atomic
+				if(!sb_set_head(&sb_counters_g[new_head]))
+					dummy_g = 1;
+				if(!sb_set_chunk(&sb_counters_g[new_head], chunk_id))
+					dummy_g = 1;
 			}
-			//printf("the slab %d is free\n", new_head);
-			//atomicCAS(&sb_counters_g[new_head], old_counter, new_counter);
+			unlock(&sb_locks_g[new_head]);
+			if(found)
+				break;
 		}  // if(got new head from free slabs)
-	}
-	
+	}	
 	return new_head;
 	// TODO: request additional memory from CUDA allocator
 }  // find_sb_for_size
@@ -306,9 +313,6 @@ __device__ __forceinline__ uint new_sb_for_size
 	if(try_lock(&head_locks_g[ihead][size_id])) {
 		// locked successfully, check if really need replacing blocks
 		uint new_head = SB_NONE;
-		//uint roomy_threshold = size_infos_g[size_id].roomy_threshold;
-		//uint sparse_threshold = size_infos_g[size_id].sparse_threshold;
-		//if(uc_cur_head == cur_head) 
 		if(cur_head == SB_NONE || 
 			 sb_count(*(volatile uint *)&sb_counters_g[cur_head]) >=
 			 size_infos_g[size_id].roomy_threshold) {
@@ -330,16 +334,18 @@ __device__ __forceinline__ uint new_sb_for_size
 				//  	printf("new head = %d with count = %d\n", new_head, 
 				//  				 (uint)sb_count(sb_counters_g[new_head]));
 				// }
-				__threadfence();
 				*(volatile uint *)&head_sbs_g[ihead][size_id] = new_head;
 				__threadfence();
 				// detach current head
-				if(cur_head != SB_NONE)
+				if(cur_head != SB_NONE) {
+					lock(&sb_locks_g[cur_head]);
 					detach_head(cur_head);
+					unlock(&sb_locks_g[cur_head]);
+				}
 #if CACHE_HEAD_SBS
 				cached_sbs_g[ihead][size_id] = find_sb_for_size(size_id, chunk_id);
 #endif
-				__threadfence();
+				//__threadfence();
 			}  // if(found new head)
 		} else {
 			// looks like we read stale data at some point, just re-read head
@@ -417,10 +423,9 @@ __device__ __forceinline__ void *sb_alloc_in
 		//if(!sb_ctr_inc(size_id, isb, 1)) {
 		if(!(inc_mask & 1)) {
 			// reservation unsuccessful (slab was freed), cancel it
-			sb_counter_dec(&sb_counters_g[isb], nchunks);
-			//atomicAnd(block_bits + iword, ~(1 << ibit));
 			uint alloc_mask = ((1 << nchunks) - 1) << ibit;
 			atomicAnd(block_bits + iword, ~alloc_mask | (old_word & alloc_mask));
+			sb_ctr_dec(isb, nchunks);
 			reserved = false;
 			needs_new_head = true;
 		} else {

@@ -256,6 +256,8 @@ void ha_init(halloc_opts_t opts) {
 	for(uint isb = 0; isb < nsbs_alloc; isb++) {
 		sb_counters[isb] = sb_counter_val(0, false, SZ_NONE, SZ_NONE);
 		sbs[isb].size_id = SZ_NONE;
+		sbs[isb].chunk_id = SZ_NONE;
+		sbs[isb].is_head = 0;
 		//sbs[isb].flags = 0;
 		sbs[isb].chunk_sz = 0;
 		//sbs[isb].chunk_id = SZ_NONE;
@@ -322,8 +324,9 @@ void ha_init(halloc_opts_t opts) {
 		size_info->hash_step = size_info->nchunks_in_block *
 		 	max_prime_below(nblocks / 256 + nblocks / 64);
 		//size_info->hash_step = size_info->nchunks_in_block * 17;
-		//printf("block = %d, step = %d, nchunks = %d\n", 
-		//			 block_sz, size_info->hash_step, size_info->nchunks);
+		// printf("block = %d, step = %d, nchunks = %d, nchunks/block = %d\n", 
+		// 			 block_sz, size_info->hash_step, size_info->nchunks, 
+		// 			 size_info->nchunks_in_block);
 		size_info->roomy_threshold = opts.roomy_fraction * size_info->nchunks;
 		size_info->busy_threshold = opts.busy_fraction * size_info->nchunks;
 		size_info->sparse_threshold = opts.sparse_fraction * size_info->nchunks;
@@ -347,6 +350,7 @@ void ha_init(halloc_opts_t opts) {
 	cuvar_memset(head_sbs_g, ~0, sizeof(head_sbs_g));
 	cuvar_memset(cached_sbs_g, ~0, sizeof(head_sbs_g));
 	cuvar_memset(head_locks_g, 0, sizeof(head_locks_g));
+	cuvar_memset(sb_locks_g, 0, sizeof(sb_locks_g));
 	//cuvar_memset(counters_g, 1, sizeof(counters_g));
 	cuvar_memset(counters_g, 11, sizeof(counters_g));
 	//fprintf(stderr, "finished cuda-memsetting\n");

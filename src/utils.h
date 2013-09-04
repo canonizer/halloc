@@ -76,7 +76,7 @@ __device__ inline void lock(uint *mutex) {
 }
 /** single-thread-per-warp unlock, without threadfence */
 __device__ inline void unlock(uint *mutex) {
-	//__threadfence();
+	__threadfence();
 	atomicExch(mutex, 0);
 }
 /** waits until the mutex is unlocked, but does not attempt locking */

@@ -46,13 +46,14 @@ for($alloc_sz = 16; $alloc_sz <= 32 * 1024; $alloc_sz += $step) {
 }  # for($step)
 
 # free slabs test - to ensure that slabs are freed correctly
-# runtest("freeslabs", "-m$memory");
+runtest("freeslabs", "-m$memory");
 
 # probabilitized tests
 $palloc = 0.75;
 $pfree = 0.75;
+#foreach $group (1, 5, 10) {
 foreach $group (1, 5) {
-		foreach $niters (1, 7) {
+		foreach $niters (1, 5) {
 #		foreach $niters (7) {
 				$ntries = $group == 1 ? 512 : 8192;
 				$ntries = ceil($ntries / $niters);

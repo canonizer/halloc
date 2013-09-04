@@ -5,12 +5,6 @@
 
 #include "utils.h"
 
-/** possible slab states */
-enum {
-	SB_FREE = 0,
-	SB_HEAD, SB_ROOMY, SB_BUSY
-};
-
 /** possible slab flags */
 enum {
 	/** slab allocated from CUDA device-side memory, and must be freed into it */
@@ -24,16 +18,14 @@ typedef struct {
 			TODO: check if we really need it
 	 */
 	uint size_id;
+	/** slab chunk id */
+	uint chunk_id;
 	/** slab chunk size */
-	uint chunk_sz;		
+	uint chunk_sz;
+	/** whether this is a head slab */
+	uint is_head;
 	/** slab flags */
 	//uint flags;
-	/** slab chunk id (currently ignored) */
-	//uint chunk_id;
-	/** slab state */
-	//uint state;
-	/** slab mutex (for changing states) */
-	//uint mutex;
 	/** pointer to memory owned by superblock */
 	void *ptr;
 } superblock_t;
@@ -74,9 +66,9 @@ __device__ inline uint sb_count(uint counter) {
 	return counter >> SB_COUNT_POS;
 }
 /** gets size id  */
-__device__ inline uint sb_size_id(uint counter) {
-	return (counter >> SB_SIZE_POS) & ((1 << SB_SIZE_SZ) - 1);
-}
+// __device__ inline uint sb_size_id(uint counter) {
+// 	return (counter >> SB_SIZE_POS) & ((1 << SB_SIZE_SZ) - 1);
+// }
 /** gets chunk id */
 __device__ inline uint sb_chunk_id(uint counter) {
 	return (counter >> SB_CHUNK_POS) & ((1 << SB_CHUNK_SZ) - 1);
@@ -85,6 +77,43 @@ __device__ inline uint sb_chunk_id(uint counter) {
 __device__ inline bool sb_is_head(uint counter) {
 	return (counter >> SB_HEAD_POS) & 1;
 }
+/** sets the head  for the counter, returns the old counter value */
+__device__ inline uint sb_set_head(uint *counter) {
+	//return atomicOr(counter, 1 << SB_HEAD_POS);
+	return atomicAdd(counter, 1 << SB_HEAD_POS);
+}
+/** resets the head for the slab counter, returns the old counter value */
+__device__ inline uint sb_reset_head(uint *counter) {
+	//return atomicAnd(counter, ~(1 << SB_HEAD_POS));
+	return atomicSub(counter, 1 << SB_HEAD_POS);
+}
+/** sets the chunk size for the slab counter, returns the old counter value; the
+		chunk must be NONE for this to work correctly */
+__device__ inline uint sb_set_chunk
+(uint *counter, uint chunk_id) {
+	return atomicSub
+		(counter, ((SZ_NONE - chunk_id) & ((1 << SB_CHUNK_SZ) - 1)) << 
+		 SB_CHUNK_POS);
+}  // sb_set_chunk
+
+/** resets the chunk from the specified size to the new size; */
+__device__ inline uint sb_reset_chunk
+(uint *counter, uint old_chunk_id) {
+	return atomicAdd
+		(counter, ((SZ_NONE - old_chunk_id) & ((1 << SB_CHUNK_SZ) - 1)) << 
+		 SB_CHUNK_POS);
+}  // sb_reset_chunk
+
+/** updates the size id only, returns the new counter */
+// __device__ inline uint sb_update_size_id
+// (uint *counter, uint old_size_id, uint new_size_id) {
+// 	old_size_id = old_size_id & ((1 << SB_SIZE_SZ) - 1);
+// 	new_size_id = new_size_id & ((1 << SB_SIZE_SZ) - 1);
+// 	if(old_size_id >= new_size_id)
+// 		return atomicSub(counter, old_size_id - new_size_id);
+// 	else
+// 		return atomicAdd(counter, new_size_id - old_size_id);
+// }  // sb_update_size_id
 /** gets the counter value for the specified count, size id and chunk id */
 __host__ __device__ inline uint sb_counter_val
 (uint count, bool is_head, uint chunk_id, uint size_id) {
