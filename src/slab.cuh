@@ -253,7 +253,9 @@ __device__ __forceinline__ uint find_sb_for_size(uint size_id, uint chunk_id) {
 			// try set head
 			lock(&sb_locks_g[new_head]);
 			bool found = false;
-			if(!sbs_g[new_head].is_head && sbs_g[new_head].chunk_id == chunk_id) {
+			if(!sbs_g[new_head].is_head && sbs_g[new_head].chunk_id == chunk_id &&
+				 sb_count(sb_counters_g[new_head]) <= 
+				 size_infos_g[size_id].sparse_threshold) {
 				found = true;
 				*(volatile bool *)&sbs_g[new_head].is_head = true;
 				*(volatile uint *)&sbs_g[new_head].size_id = size_id;

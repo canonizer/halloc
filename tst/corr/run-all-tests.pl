@@ -51,10 +51,10 @@ runtest("freeslabs", "-m$memory");
 # probabilitized tests
 $palloc = 0.75;
 $pfree = 0.75;
-#foreach $group (1, 5, 10) {
-foreach $group (1, 5) {
+#foreach $group (10) {
+foreach $group (1, 5, 10) {
 		foreach $niters (1, 5) {
-#		foreach $niters (7) {
+#		foreach $niters (1) {
 				$ntries = $group == 1 ? 512 : 8192;
 				$ntries = ceil($ntries / $niters);
 				@fixed_args = ("prob-checkptr", "-i$niters", "-t$ntries", "-p$palloc",
@@ -62,17 +62,14 @@ foreach $group (1, 5) {
 				# small sizes (<= 64 bytes)
 				$nthreads = 1024 * 1024;
 				runtest(@fixed_args, "-l4", "-n$nthreads", "-s8", "-S64", "-duniform");
-				#runtest(@fixed_args, "-l4", "-n$nthreads", "-s8", "-S64", "-dexpequal");
 				# medium sizes (<= 256 bytes)
 				runtest(@fixed_args, "-l1", "-n$nthreads", "-s8", "-S256", "-duniform");
-				runtest(@fixed_args, "-l4", "-n$nthreads", "-s8", "-S256",
-								"-dexpequal");
+				runtest(@fixed_args, "-l4", "-n$nthreads", "-s8", "-S256",	"-dexpequal");
 				# large-size test (<= 3072 bytes)				
 				$nthreads = 64 * 1024;
 				runtest(@fixed_args, "-l1", "-n$nthreads", "-s8", "-S3072", "-duniform");
 				$nthreads = 128 * 1024;
-				runtest(@fixed_args, "-l4", "-n$nthreads", "-s8", "-S3072",
-								"-dexpequal");
+				runtest(@fixed_args, "-l4", "-n$nthreads", "-s8", "-S3072",	"-dexpequal");
 		}
 }
 
