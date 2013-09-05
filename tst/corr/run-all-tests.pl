@@ -55,7 +55,7 @@ $pfree = 0.75;
 foreach $group (1, 5, 10) {
 		foreach $niters (1, 5) {
 #		foreach $niters (1) {
-				$ntries = $group == 1 ? 512 : 8192;
+				$ntries = $group == 1 ? 1024 : 16384;
 				$ntries = ceil($ntries / $niters);
 				@fixed_args = ("prob-checkptr", "-i$niters", "-t$ntries", "-p$palloc",
 											 "-P$pfree", "-g$group");

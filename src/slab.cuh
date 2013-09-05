@@ -149,6 +149,8 @@ __device__ __forceinline__ void sb_ctr_dec(uint sb_id, uint nchunks) {
 	bool want_inc = true;
 	uint mask, lid = lane_id();
 	while(mask = __ballot(want_inc)) {
+	//while(want_inc) {
+		//mask = __ballot(want_inc);
 		uint leader_lid = warp_leader(mask), leader_sb_id = sb_id;
 		uint leader_nchunks = nchunks;
 		leader_sb_id = __shfl((int)leader_sb_id, leader_lid);
@@ -255,7 +257,7 @@ __device__ __forceinline__ uint find_sb_for_size(uint size_id, uint chunk_id) {
 			bool found = false;
 			if(!sbs_g[new_head].is_head && sbs_g[new_head].chunk_id == chunk_id &&
 				 sb_count(sb_counters_g[new_head]) <= 
-				 2 * size_infos_g[size_id].sparse_threshold) {
+				 size_infos_g[size_id].sparse_threshold) {
 				found = true;
 				*(volatile bool *)&sbs_g[new_head].is_head = true;
 				*(volatile uint *)&sbs_g[new_head].size_id = size_id;

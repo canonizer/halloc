@@ -76,12 +76,13 @@ __device__ __forceinline__ uint size_ctr_inc(uint size_id) {
 		uint leader_size_id = size_id;
 		leader_size_id = __shfl((int)leader_size_id, leader_lid);
 		group_mask = __ballot(size_id == leader_size_id);
-		if(lid == leader_lid)
-			old_counter = atomicAdd(&counters_g[size_id], __popc(group_mask));
+
 		mask &= ~group_mask;
 		want_inc = want_inc && size_id != leader_size_id;
 		// }
 	}  // while
+	if(lid == leader_lid)
+		old_counter = atomicAdd(&counters_g[size_id], __popc(group_mask));
 	old_counter = __shfl((int)old_counter, leader_lid);
 	change =  __popc(group_mask & ((1 << lid) - 1));
 	uint cv = old_counter + change;
