@@ -63,6 +63,8 @@ __device__ inline void sb_set_alloc_size
 (uint *alloc_words, uint ichunk, uint	nchunks) {
 	uint iword = ichunk / 4, ibyte = ichunk % 4, shift = ibyte * 8;
 	uint mask = nchunks << shift;
+	//if(atomicOr(&alloc_words[iword], mask) & mask)
+	//	dummy_g = 1;
 	atomicOr(&alloc_words[iword], mask);
 }  // sb_set_alloc_size
 
@@ -255,15 +257,20 @@ __device__ __forceinline__ uint find_sb_for_size(uint size_id, uint chunk_id) {
 			// try set head
 			lock(&sb_locks_g[new_head]);
 			bool found = false;
-			if(!sbs_g[new_head].is_head && sbs_g[new_head].chunk_id == chunk_id &&
-				 sb_count(sb_counters_g[new_head]) <= 
+			if(!sbs_g[new_head].is_head && sbs_g[new_head].chunk_id == chunk_id) {
+				if(sb_count(sb_counters_g[new_head]) <= 
 				 size_infos_g[size_id].sparse_threshold) {
+					// found
 				found = true;
 				*(volatile bool *)&sbs_g[new_head].is_head = true;
 				*(volatile uint *)&sbs_g[new_head].size_id = size_id;
 				// ensure that the counter is updated
 				if(!sb_set_head(&sb_counters_g[new_head]))
 					dummy_g = 1;
+				} else {
+					// add to something roomy
+					sbset_add_to(roomy_sbs_g[size_id], new_head);
+				}
 			}
 			unlock(&sb_locks_g[new_head]);
 			if(found)
@@ -279,8 +286,9 @@ __device__ __forceinline__ uint find_sb_for_size(uint size_id, uint chunk_id) {
 			// fill in the slab
 			lock(&sb_locks_g[new_head]);
 			bool found = false;			
-			if(!sbs_g[new_head].is_head && sbs_g[new_head].chunk_id == SZ_NONE && 
-				 sbs_g[new_head].size_id == SZ_NONE) {
+			//if(!sbs_g[new_head].is_head && sbs_g[new_head].chunk_id == SZ_NONE && 
+			//	 sbs_g[new_head].size_id == SZ_NONE) {
+			if(!sbs_g[new_head].is_head) {
 				found = true;
 				*(volatile bool *)&sbs_g[new_head].is_head = true;
 				*(volatile uint *)&sbs_g[new_head].size_id = size_id;
