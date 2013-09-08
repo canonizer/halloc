@@ -62,6 +62,7 @@ __device__ inline uint *sb_alloc_sizes(uint sb) {
 __device__ inline void sb_set_alloc_size
 (uint *alloc_words, uint ichunk, uint	nchunks) {
 	uint iword = ichunk / 4, ibyte = ichunk % 4, shift = ibyte * 8;
+	//uint iword = ichunk / 16, ibyte = ichunk % 16, shift = ibyte * 2;
 	uint mask = nchunks << shift;
 	//if(atomicOr(&alloc_words[iword], mask) & mask)
 	//	dummy_g = 1;
@@ -72,16 +73,17 @@ __device__ inline void sb_set_alloc_size
 		@returns the number of chunks allocated for this allocation (max 15)
  */
 __device__ inline uint sb_get_reset_alloc_size(uint *alloc_words, uint ichunk) {
-	uint iword = ichunk / 4, ibyte = ichunk % 4, shift = ibyte * 8;
-	uint mask = ~(0xf << shift);
-	return (atomicAnd(&alloc_words[iword], mask) >> shift) & 0xfu;
+	uint iword = ichunk / 4, ibyte = ichunk % 4, shift = ibyte * 8, cmask = 0xfu;
+	//uint iword = ichunk / 16, ibyte = ichunk % 16, shift = ibyte * 2, cmask = 0x3u;
+	uint mask = ~(cmask << shift);
+	return (atomicAnd(&alloc_words[iword], mask) >> shift) & cmask;
 }  // sb_get_reset_alloc_size
 
 /** tries to mark a slab as free; can only be performed when slab is locked
 		@param from_head whether there's a try to mark slab as free during detaching
 		from head (this is very unlikely)
  */
-__device__ inline void sb_try_mark_free
+__device__ __forceinline__ void sb_try_mark_free
 (uint sb, uint size_id, uint chunk_id, bool from_head) {
 	// do nothing if it is head or chunk id is unset
 	if(sbs_g[sb].is_head || chunk_id == SZ_NONE)
@@ -239,7 +241,8 @@ __device__ __forceinline__ uint find_sb_for_size(uint size_id, uint chunk_id) {
 		// try set head
 		lock(&sb_locks_g[new_head]);
 		bool found = false;
-		if(!sbs_g[new_head].is_head && sbs_g[new_head].size_id == size_id) {
+		if(!sbs_g[new_head].is_head && sbs_g[new_head].size_id == size_id
+			 && sb_count(sb_counters_g[new_head]) <= size_infos_g[size_id].roomy_threshold) {
 			found = true;
 			*(volatile bool *)&sbs_g[new_head].is_head = true;
 			// ensure that the counter is updated
@@ -327,7 +330,7 @@ __device__ __forceinline__ uint new_sb_for_size
 		uint new_head = SB_NONE;
 		if(cur_head == SB_NONE || 
 			 sb_count(*(volatile uint *)&sb_counters_g[cur_head]) >=
-			 size_infos_g[size_id].roomy_threshold) {
+			 size_infos_g[size_id].busy_threshold) {
 			
 #if CACHE_HEAD_SBS
 			new_head = cached_sbs_g[ihead][size_id];
@@ -346,6 +349,8 @@ __device__ __forceinline__ uint new_sb_for_size
 				//  	printf("new head = %d with count = %d\n", new_head, 
 				//  				 (uint)sb_count(sb_counters_g[new_head]));
 				// }
+				//printf("new head slab %d with count %d\n", new_head, 
+				//			 sb_count(sb_counters_g[new_head]));
 				*(volatile uint *)&head_sbs_g[ihead][size_id] = new_head;
 				__threadfence();
 				// detach current head
@@ -397,7 +402,6 @@ __device__ __forceinline__ void *sb_alloc_in
 	void *p = 0;
 	uint *block_bits = sb_block_bits(isb);
 	//superblock_t sb = sbs_g[isb];
-	void *sbptr = sbs_g[isb].ptr;
 	uint nchunks = size_infos_g[size_id].nchunks_in_block;
 
 	uint iword, ibit, old_word;
@@ -443,6 +447,7 @@ __device__ __forceinline__ void *sb_alloc_in
 		} else {
 			if(inc_mask & 2)
 				needs_new_head = true;
+			void *sbptr = sbs_g[isb].ptr;
 			p = (char *)sbptr + ichunk * size_info->chunk_sz;
 			// write allocation size
 			// TODO: support chunks of other size

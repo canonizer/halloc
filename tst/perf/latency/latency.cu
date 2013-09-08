@@ -136,7 +136,7 @@ public:
 };  // LatencyTest
 
 int main(int argc, char **argv) {
-	CommonOpts opts;
+	CommonOpts opts(true);
 	run_test<LatencyTest> (argc, argv, opts);
 	return 0;
 }  // main

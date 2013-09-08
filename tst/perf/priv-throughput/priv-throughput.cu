@@ -77,7 +77,7 @@ public:
 };  // PrivThroughputTest
 
 int main(int argc, char **argv) {
-	CommonOpts opts;
+	CommonOpts opts(true);
 	run_test<PrivThroughputTest>(argc, argv, opts);
 	return 0;
 }  // main

@@ -49,7 +49,7 @@ public:
 };  // CheckPtrTest
 
 int main(int argc, char **argv) {
-	CommonOpts opts;
+	CommonOpts opts(true);
 	run_test<CheckPtrTest> (argc, argv, opts, false);
 	return 0;
 }  // main

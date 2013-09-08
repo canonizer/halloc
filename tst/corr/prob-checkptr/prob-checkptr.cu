@@ -12,30 +12,25 @@
 /** global counters for number of allocations, frees and total size allocated
 		*/
 
+__constant__ CommonOpts opts_g;
+
 /** the kernel of the probability throughput test */
 template <class T>
-__global__ void prob_corr_k(CommonOpts opts, void **ptrs, uint *ctrs) {
+__global__ void prob_corr_k
+(void **ptrs, uint *ctrs, uint itry) {
 	uint i = threadIdx.x + blockIdx.x * blockDim.x;
-	uint n = opts.nthreads, nallocs = opts.nallocs;
-	if(opts.is_thread_inactive(i))
+	uint n = opts_g.nthreads, nallocs = opts_g.nallocs;
+	if(opts_g.is_thread_inactive(i))
 		return;
 	uint ctr = ctrs[i];
 
 	// iterate 
-	for(uint iter = 0; iter < opts.niters; iter++) {
-		// get the action
-		float rnd = drandomf();
-		ActionType action = ActionNone;
-		if(ctr == 0 && rnd <= opts.palloc) {
-			action = ActionAlloc;
-		} else if(ctr == opts.nallocs && rnd <= opts.pfree) {
-			action = ActionFree;
-		}
+	for(uint iter = 0; iter < opts_g.niters; iter++) {
 		// perform the action
-		switch(action) {
+		switch(opts_g.next_action(ctr > 0, itry, iter)) {
 		case ActionAlloc:
 			for(uint ialloc = 0; ialloc < nallocs; ialloc++) {
-				uint sz = opts.next_alloc_sz();
+				uint sz = opts_g.next_alloc_sz();
 				void *ptr = T::malloc(sz);
 				ptrs[ialloc * n + i] = ptr;
 				if(ptr)
@@ -57,11 +52,11 @@ __global__ void prob_corr_k(CommonOpts opts, void **ptrs, uint *ctrs) {
 /** free the rest after the throughput test; this also counts against the total
 		time */
 template <class T> __global__ void free_rest_k
-(CommonOpts opts, void **ptrs, uint *ctrs) {
+(void **ptrs, uint *ctrs) {
 	uint i = threadIdx.x + blockIdx.x * blockDim.x;
-	if(opts.is_thread_inactive(i))
+	if(opts_g.is_thread_inactive(i))
 		return;
-	uint ctr = ctrs[i], n = opts.nthreads;
+	uint ctr = ctrs[i], n = opts_g.nthreads;
 	for(uint ialloc = 0; ialloc < ctr; ialloc++) {
 		T::free(ptrs[n * ialloc + i]);
 	}
@@ -85,12 +80,14 @@ public:
 		cucheck(cudaMalloc((void **)&d_ctrs, ctrs_sz));
 		cucheck(cudaMemset(d_ctrs, 0, ctrs_sz));
 
+		cuset(opts_g, CommonOpts, opts);
+
 		// do testing
 		for(int itry = 0; itry < opts.ntries; itry++) {
 			printf("iteration %d\n", itry);
 			// run the kernel
 			//printf("kernel configuration: %d, %d\n", grid, bs);
-			prob_corr_k<T> <<<grid, bs>>>(opts, d_ptrs, d_ctrs);
+			prob_corr_k<T> <<<grid, bs>>>(d_ptrs, d_ctrs, itry);
 			cucheck(cudaGetLastError());
 			cucheck(cudaStreamSynchronize(0));
 			// check that pointers are correct
@@ -102,7 +99,7 @@ public:
 
 		// free the rest
 		printf("freeing the rest\n");
-		free_rest_k<T> <<<grid, bs>>> (opts, d_ptrs, d_ctrs);
+		free_rest_k<T> <<<grid, bs>>> (d_ptrs, d_ctrs);
 		cucheck(cudaGetLastError());
 		cucheck(cudaStreamSynchronize(0));
 
@@ -114,7 +111,7 @@ public:
 };  // ProbThroughputTest
 
 int main(int argc, char **argv) {
-	CommonOpts opts;
+	CommonOpts opts(true);
 	run_test<ProbCorrTest>(argc, argv, opts, false);
 	return 0;
 }  // main

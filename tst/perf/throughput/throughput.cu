@@ -77,7 +77,7 @@ public:
 };  // LatencyTest
 
 int main(int argc, char **argv) {
-	CommonOpts opts;
+	CommonOpts opts(true);
 	run_test<ThroughputTest>(argc, argv, opts);
 	return 0;
 }  // main

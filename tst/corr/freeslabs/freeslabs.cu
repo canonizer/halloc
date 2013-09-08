@@ -77,7 +77,7 @@ public:
 };  // FreeSlabsTest
 
 int main(int argc, char **argv) {
-	CommonOpts opts;
+	CommonOpts opts(true);
 	opts.ntries = 4;
 	run_test<FreeSlabsTest> (argc, argv, opts, false);
 	return 0;

@@ -49,16 +49,17 @@ for($alloc_sz = 16; $alloc_sz <= 32 * 1024; $alloc_sz += $step) {
 runtest("freeslabs", "-m$memory");
 
 # probabilitized tests
-$palloc = 0.75;
-$pfree = 0.75;
+$falloc = 0.5;
+$ffree = 0.5;
+$fexec = 0.75;
 #foreach $group (10) {
 foreach $group (1, 5, 10) {
 		foreach $niters (1, 5) {
 #		foreach $niters (1) {
 				$ntries = $group == 1 ? 1024 : 16384;
 				$ntries = ceil($ntries / $niters);
-				@fixed_args = ("prob-checkptr", "-i$niters", "-t$ntries", "-p$palloc",
-											 "-P$pfree", "-g$group");
+				@fixed_args = ("prob-checkptr", "-i$niters", "-t$ntries", "-f$falloc",
+											 "-F$ffree", "-e$fexec", "-g$group");
 				# small sizes (<= 64 bytes)
 				$nthreads = 1024 * 1024;
 				runtest(@fixed_args, "-l4", "-n$nthreads", "-s8", "-S64", "-duniform");

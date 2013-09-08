@@ -106,19 +106,31 @@ static inline __device__ float drandomf(void) {
 	return f * drandom(0, m - 1);
 }  // drandomf
 
+/** get the random boolean value with the specified probability
+		@param probab the probability to return true
+ */
+static inline __device__ bool drandomb(float probab) {
+	if(0.0f < probab && probab < 1.0f)
+		return drandomf() <= probab;
+	else 
+		return probab >= 1.0f;
+}  // drandomb
+
 /** common options for tests and allocator intiialization; note that some tests
 		are free to provide their own default settings */
 struct CommonOpts {
 	/** default initialization for common options */
-	CommonOpts() 
+	CommonOpts(bool dummy) 
 		: allocator(AllocatorHalloc), memory(512 * 1024 * 1024), 
 			halloc_fraction(0.75), busy_fraction(0.85), roomy_fraction(0.6),
 			sparse_fraction(0.0125), sb_sz_sh(22), device(0), nthreads(1024 * 1024),
 			ntries(8), alloc_sz(16), max_alloc_sz(16), nallocs(4), niters(1),
-			alloc_fraction(0.4), bs(128), period_mask(0), group_sh(0),
-			distr_type(DistrUniform), palloc(0.5), pfree(0.5) {
+			bs(128), period_mask(0), group_sh(0),	distr_type(DistrUniform), 
+			alloc_fraction(1), free_fraction(0), exec_fraction(1) {
 		recompute_fields();
 	}
+
+	__host__ __device__ CommonOpts() {}
 	/** parses the options from command line, with the defaults specified; memory
 		is also capped to fraction of device-available at this step 
 		@param [in, out] this the default options on the input, and the options
@@ -163,8 +175,6 @@ struct CommonOpts {
 	/** number of inside-kernel iterations, applicable only to priv-* samples,
 	forced to one in other cases, -i */
 	int niters;
-	/** fraction of memory to allocate in test, -f */
-	double alloc_fraction;
 	/** period mask, indicates one of how many threads actually does allocation;
 	-q specifies period shift
 	*/
@@ -174,14 +184,23 @@ struct CommonOpts {
 	int group_sh;
 	/** gets the allocation size distribution type; -d */
 	DistrType distr_type;
-	/** allocation probability, ignored for non-probability tests; -p */
-	float palloc;
-	/** free probability, ignored for non-probability tests; palloc + pfree <= 1,
-	otherwise it's an error; -P */
-	float pfree;
+	/** probabilities; first dimension is the phase (alloc = 0, free = 1), second
+	dimension is the action to be taken (alloc = 0, free = 1); these cannot be specified
+	from command line directly, and computed instead from steady state*/
+	float probabs[2][2];
+	/** the steady state fraction threads having something allocated after the
+	allocation phase (f' in equation terms); -f
+	*/
+	float alloc_fraction;
+	/** the steady state fraction of threads having something allocated after the
+	free phase (f'' in equation terms); -F */
+	float free_fraction;
+	/** the fraction of threads which need to do (execute) something between
+	steady states; -e */
+	float exec_fraction;
 	/** gets the total number of allocations, as usually defined for tests; for
 	randomized tests, expectation is returned; individual tests may use their own
-	definition; -d */
+	definition */
 	double total_nallocs(void);
 	/** gets the total size of all the allocations; for randomized tests,
 	expectation is returned
@@ -189,6 +208,18 @@ struct CommonOpts {
 	double total_sz(void);
 	/** gets the single allocation expectation size */
 	double expected_sz(void);
+
+	/** gets the next action */
+	__device__ ActionType next_action
+	(bool allocated, uint itry, uint iter) const {
+		uint phase = (itry * niters + iter) % 2;
+		uint state = allocated ? 1 : 0;
+		if(drandomb(probabs[phase][state]))
+			return allocated ? ActionFree : ActionAlloc;
+		else
+			return ActionNone;
+	}  // next_action
+
 	/** gets the next allocation size, which can be random */
 	__device__ uint next_alloc_sz(void) const {
 		// single-size case

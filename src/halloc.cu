@@ -131,13 +131,16 @@ __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
   //ichunk = ichunk * size_info->nchunks_in_block & (size_info->nchunks - 1);
 	// main allocation loop
 	bool want_alloc = true, need_roomy_sb = false;
+	//uint res_mask = 0xc;
 	// use two-level loop to avoid warplocks
 	//uint ntries = 0;
 	do {
 		if(want_alloc) {
+			//if(res_mask & 4)
 			// try allocating in head superblock
 			//head_sb = head_sbs_g[size_id];
 			p = sb_alloc_in(ihead, head_sb, ichunk, size_id, need_roomy_sb);
+			//p = sb_alloc_in(ihead, head_sb, ichunk, size_id, res_mask);
 			want_alloc = !p;
 			//assert(!want_alloc || need_roomy_sb);
 			while(__any(need_roomy_sb)) {

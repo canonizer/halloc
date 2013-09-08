@@ -89,7 +89,7 @@ DistrType parse_distr(char *str) {
 }  // parse_distr
 
 void CommonOpts::parse_cmdline(int argc, char **argv) {
-	static const char *common_opts_str = ":ha:m:C:B:R:D:b:n:t:T:s:S:l:i:f:q:g:d:p:P:";
+	static const char *common_opts_str = ":ha:m:C:B:R:D:b:n:t:T:s:S:l:i:q:g:d:f:F:e:";
 	int c;
 	int period_sh, ndevices;
 	cucheck(cudaGetDeviceCount(&ndevices));
@@ -176,9 +176,6 @@ void CommonOpts::parse_cmdline(int argc, char **argv) {
 		case 'i':
 			niters = parse_int(optarg, 1);
 			break;
-		case 'f':
-			alloc_fraction = parse_double(optarg);
-			break;
 		case 'q':
 			period_sh = parse_int(optarg, 0, 31);
 			period_mask = period_sh > 0 ? ((1 << period_sh) - 1) : 0;
@@ -189,13 +186,16 @@ void CommonOpts::parse_cmdline(int argc, char **argv) {
 		case 'd':
 			distr_type = parse_distr(optarg);
 			break;
-		case 'p':
-			palloc = (float)parse_double(optarg);
+		case 'f':
+			alloc_fraction = (float)parse_double(optarg);
 			break;
-		case 'P':
-			pfree = (float)parse_double(optarg);
+		case 'F':
+			free_fraction = (float)parse_double(optarg);
 			break;
-
+		case 'e':
+			exec_fraction = (float)parse_double(optarg);
+			break;
+			
 		default:
 			fprintf(stderr, "this simply should not happen when parsing options\n");
 			print_usage_and_exit(-1);
@@ -277,6 +277,42 @@ void CommonOpts::recompute_fields(void) {
 	max_alloc_sh = 0;
 	while(max_alloc_sz >= alloc_sz << (max_alloc_sh + 1))
 		max_alloc_sh++;
+
+	// recompute probabilities
+	if(exec_fraction + alloc_fraction + free_fraction > 2) {
+		fprintf(stderr, "too large change fraction\n");
+		print_usage_and_exit(-1);
+	} else if(exec_fraction < fabsf(alloc_fraction - free_fraction)) {
+		fprintf(stderr, "too small change fraction\n");
+		print_usage_and_exit(-1);
+	}
+	// 0 = alloc, 1 = free
+	float p00, p01, p10, p11;
+	if(free_fraction < 1) {
+		p00 = (exec_fraction + alloc_fraction - free_fraction) / 
+			(2 * (1 - free_fraction));
+	} else
+		p00 = 1;
+	if(free_fraction > 0) {
+		p01 = (exec_fraction - alloc_fraction + free_fraction) / 
+		  (2 * free_fraction);
+	} else
+		p01 = 1;
+	if(alloc_fraction < 1) {
+		p10 = (exec_fraction - alloc_fraction + free_fraction) / 
+			(2 * (1 - alloc_fraction));
+	} else
+		p10 = 1;
+	if(alloc_fraction > 0) {
+		p11 = (exec_fraction + alloc_fraction - free_fraction) / 
+			(2 * alloc_fraction);
+	}
+	probabs[0][0] = p00;
+	probabs[0][1] = p01;
+	probabs[1][0] = p10;
+	probabs[1][1] = p11;
+	//printf("p00 = %.2lf, p01 = %.2lf, p02 = %.2lf, p03 = %.2lf\n",
+	//			 (double)p00, (double)p01, (double)p10, (double)p11);
 }  // recompute_fields
 
 void drandom_init(const CommonOpts &opts) {
