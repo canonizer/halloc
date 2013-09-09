@@ -13,8 +13,6 @@
 		*/
 __device__ uint64 nmallocs_g = 0;
 
-__constant__ CommonOpts opts_g;
-
 /** the kernel of the probability throughput test */
 template <class T>
 __global__ void prob_throughput_k
@@ -51,21 +49,8 @@ __global__ void prob_throughput_k
 	ctrs[i] = ctr;
 }  // prob_throughput_k
 
-/** free the rest after the throughput test; this also counts against the total
-		time */
-template <class T> __global__ void free_rest_k(void **ptrs, uint *ctrs) {
-	uint i = threadIdx.x + blockIdx.x * blockDim.x;
-	if(opts_g.is_thread_inactive(i))
-		return;
-	uint ctr = ctrs[i], n = opts_g.nthreads;
-	for(uint ialloc = 0; ialloc < ctr; ialloc++) {
-		T::free(ptrs[n * ialloc + i]);
-	}
-	ctrs[i] = 0;
-}  // free_rest_k
-
 /** measures malloc throughput */
-template<class T> class ProbThroughputTest {
+template<class T> class PhaseThroughputTest {
 	
 public:
 	void operator()(CommonOpts opts, bool warmup) {
@@ -159,10 +144,10 @@ public:
 		cucheck(cudaFree(d_ctrs));
 	}  // operator()
  
-};  // ProbThroughputTest
+};  // PhaseThroughputTest
 
 int main(int argc, char **argv) {
 	CommonOpts opts(true);
-	run_test<ProbThroughputTest>(argc, argv, opts);
+	run_test<PhaseThroughputTest>(argc, argv, opts);
 	return 0;
 }  // main

@@ -407,6 +407,7 @@ __device__ __forceinline__ void *sb_alloc_in
 	uint iword, ibit, old_word;
 	bool reserved = false;
 	// iterate until successfully reserved
+	//uint step = size_info->hash_step;
 	for(uint itry = 0; itry < MAX_NTRIES; itry++) {
 		// try reserve
 		iword = ichunk / WORD_SZ;
@@ -428,7 +429,10 @@ __device__ __forceinline__ void *sb_alloc_in
 				if(count >= size_info->busy_threshold)
 					break;
 			}
-			ichunk = (ichunk + size_info->hash_step) % size_info->nchunks;
+			//ichunk = (ichunk + size_info->hash_step) % size_info->nchunks;
+			ichunk = (ichunk + size_info->hash_step * (itry * itry * itry + 1))
+				% size_info->nchunks;
+			//step = (step + size_info->hash_step) % size_info->nchunks;
 			//ichunk = (ichunk + size_info->hash_step) & (size_info->nchunks - 1);
 		}
 	}

@@ -9,11 +9,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/** global counters for number of allocations, frees and total size allocated
-		*/
-
-__constant__ CommonOpts opts_g;
-
 /** the kernel of the probability throughput test */
 template <class T>
 __global__ void prob_corr_k
@@ -48,20 +43,6 @@ __global__ void prob_corr_k
 	}  // for(each iteration)
 	ctrs[i] = ctr;
 }  // prob_throughput_k
-
-/** free the rest after the throughput test; this also counts against the total
-		time */
-template <class T> __global__ void free_rest_k
-(void **ptrs, uint *ctrs) {
-	uint i = threadIdx.x + blockIdx.x * blockDim.x;
-	if(opts_g.is_thread_inactive(i))
-		return;
-	uint ctr = ctrs[i], n = opts_g.nthreads;
-	for(uint ialloc = 0; ialloc < ctr; ialloc++) {
-		T::free(ptrs[n * ialloc + i]);
-	}
-	ctrs[i] = 0;
-}  // free_rest_k
 
 /** measures malloc throughput */
 template<class T> class ProbCorrTest {

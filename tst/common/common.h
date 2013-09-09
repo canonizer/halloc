@@ -280,6 +280,10 @@ struct CommonOpts {
 	void recompute_fields(void);
 };
 
+#ifndef COMMONTEST_COMPILING
+__constant__ CommonOpts opts_g;
+#endif
+
 /** initialize device generation of random numbers */
 void drandom_init(const CommonOpts &opts);
 
@@ -349,6 +353,8 @@ void run_test(int argc, char ** argv, CommonOpts &opts, bool with_warmup = true)
 	}
 }  // run_test
 
+#ifndef COMMONTEST_COMPILING
+
 /** helper malloc kernel used by many tests throughout */
 template<class T>
 __global__ void malloc_k
@@ -389,5 +395,20 @@ __global__ void free_k
 	for(int ialloc = 0; ialloc < opts.nallocs; ialloc++) 
 		T::free(ptrs[i + n * ialloc]);
 }  // free_k
+
+/** free the rest after the throughput test; this also counts against the total
+		time */
+template <class T> __global__ void free_rest_k(void **ptrs, uint *ctrs) {
+	uint i = threadIdx.x + blockIdx.x * blockDim.x;
+	if(opts_g.is_thread_inactive(i))
+		return;
+	uint ctr = ctrs[i], n = opts_g.nthreads;
+	for(uint ialloc = 0; ialloc < ctr; ialloc++) {
+		T::free(ptrs[n * ialloc + i]);
+	}
+	ctrs[i] = 0;
+}  // free_rest_k
+
+#endif
 
 #endif
