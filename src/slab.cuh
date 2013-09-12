@@ -61,6 +61,7 @@ __device__ inline uint *sb_alloc_sizes(uint sb) {
  */
 __device__ inline void sb_set_alloc_size
 (uint *alloc_words, uint ichunk, uint	nchunks) {
+	
 	uint iword = ichunk / 4, ibyte = ichunk % 4, shift = ibyte * 8;
 	//uint iword = ichunk / 16, ibyte = ichunk % 16, shift = ibyte * 2;
 	uint mask = nchunks << shift;
@@ -77,6 +78,7 @@ __device__ inline uint sb_get_reset_alloc_size(uint *alloc_words, uint ichunk) {
 	//uint iword = ichunk / 16, ibyte = ichunk % 16, shift = ibyte * 2, cmask = 0x3u;
 	uint mask = ~(cmask << shift);
 	return (atomicAnd(&alloc_words[iword], mask) >> shift) & cmask;
+	//return 1;
 }  // sb_get_reset_alloc_size
 
 /** tries to mark a slab as free; can only be performed when slab is locked
@@ -92,18 +94,21 @@ __device__ __forceinline__ void sb_try_mark_free
 	do {
 		old_counter = sb_reset_chunk(&sb_counters_g[sb], chunk_id);
 		if(sb_count(old_counter) == 0) {
-			if(!from_head)
-				sbset_remove_from(sparse_sbs_g[chunk_id], sb);
+			//if(!from_head)
 			sbs_g[sb].size_id = SZ_NONE;
 			sbs_g[sb].chunk_id = SZ_NONE;
 			sbs_g[sb].chunk_sz = 0;
 			sbset_add_to(free_sbs_g, sb);
+			__threadfence();
+			if(!from_head)
+				sbset_remove_from(sparse_sbs_g[chunk_id], sb);
 			return;
 		}
 	} while(sb_count(sb_set_chunk(&sb_counters_g[sb], chunk_id)) == 0);
 	// add somewhere if detaching from head
 	if(from_head)
-		sbset_add_to(roomy_sbs_g[size_id], sb);
+		sbset_add_to(sparse_sbs_g[chunk_id], sb);
+	//sbset_add_to(roomy_sbs_g[size_id], sb); 
 }  // sb_try_mark_free
 
 /** increment the non-distributed counter of the superblock 
@@ -182,6 +187,8 @@ __device__ __forceinline__ void sb_ctr_dec(uint sb_id, uint nchunks) {
 						//uint chunk_id = sb_chunk_id(old_counter);
 						if(new_count <= sparse_threshold && 
 							 old_count > sparse_threshold)	{
+							sbset_add_to(sparse_sbs_g[chunk_id], sb_id);
+							__threadfence();
 							sbset_remove_from(roomy_sbs_g[size_id], sb_id);
 							sbset_add_to(sparse_sbs_g[chunk_id], sb_id);
 						}	else if(new_count == 0) {
@@ -191,6 +198,7 @@ __device__ __forceinline__ void sb_ctr_dec(uint sb_id, uint nchunks) {
 								size_id = *(volatile uint *)&sbs_g[sb_id].size_id;
 								chunk_id = *(volatile uint *)&sbs_g[sb_id].chunk_id;
 								sb_try_mark_free(sb_id, size_id, chunk_id, false);
+								//sb_try_mark_free(sb_id, size_id, chunk_id);
 								unlock(&sb_locks_g[sb_id]);
 							}
 						}  // if(slab position in sets changes)
@@ -217,6 +225,7 @@ __device__ __forceinline__ void detach_head(uint head) {
 		uint chunk_id = sbs_g[head].chunk_id;
 		if(count == 0) {
 			sb_try_mark_free(head, size_id, chunk_id, true);
+			//sb_try_mark_free(head, size_id, chunk_id);
 		} else {
 			uint sparse_threshold = size_infos_g[chunk_id].sparse_threshold;
 			if(count <= sparse_threshold) {
@@ -262,17 +271,19 @@ __device__ __forceinline__ uint find_sb_for_size(uint size_id, uint chunk_id) {
 			bool found = false;
 			if(!sbs_g[new_head].is_head && sbs_g[new_head].chunk_id == chunk_id) {
 				if(sb_count(sb_counters_g[new_head]) <= 
-				 size_infos_g[size_id].sparse_threshold) {
+					 size_infos_g[size_id].sparse_threshold) {
 					// found
-				found = true;
-				*(volatile bool *)&sbs_g[new_head].is_head = true;
-				*(volatile uint *)&sbs_g[new_head].size_id = size_id;
-				// ensure that the counter is updated
-				if(!sb_set_head(&sb_counters_g[new_head]))
-					dummy_g = 1;
+					found = true;
+					*(volatile bool *)&sbs_g[new_head].is_head = true;
+					*(volatile uint *)&sbs_g[new_head].size_id = size_id;
+					// ensure that the counter is updated
+					if(!sb_set_head(&sb_counters_g[new_head]))
+						dummy_g = 1;
 				} else {
 					// add to something roomy
-					sbset_add_to(roomy_sbs_g[size_id], new_head);
+					//sbset_add_to(roomy_sbs_g[size_id], new_head);
+					uint sb_size_id = *(volatile uint *)&sbs_g[new_head].size_id;
+					sbset_add_to(roomy_sbs_g[sb_size_id], new_head);
 				}
 			}
 			unlock(&sb_locks_g[new_head]);
@@ -326,6 +337,7 @@ __device__ __forceinline__ uint new_sb_for_size
 	//uint64 t1 = clock64();
 	uint cur_head = *(volatile uint *)&head_sbs_g[ihead][size_id];
 	if(try_lock(&head_locks_g[ihead][size_id])) {
+		uint cur_head = *(volatile uint *)&head_sbs_g[ihead][size_id];
 		// locked successfully, check if really need replacing blocks
 		uint new_head = SB_NONE;
 		if(cur_head == SB_NONE || 
@@ -403,15 +415,13 @@ __device__ __forceinline__ void *sb_alloc_in
 	uint *block_bits = sb_block_bits(isb);
 	//superblock_t sb = sbs_g[isb];
 	uint nchunks = size_infos_g[size_id].nchunks_in_block;
-
-	uint iword, ibit, old_word;
+	uint old_word;
 	bool reserved = false;
 	// iterate until successfully reserved
-	//uint step = size_info->hash_step;
 	for(uint itry = 0; itry < MAX_NTRIES; itry++) {
 		// try reserve
-		iword = ichunk / WORD_SZ;
-		ibit = ichunk % WORD_SZ;
+		uint iword = ichunk / WORD_SZ;
+		uint ibit = ichunk % WORD_SZ;
 		uint alloc_mask = ((1 << nchunks) - 1) << ibit;
 		old_word = atomicOr(block_bits + iword, alloc_mask);
 		if(!(old_word & alloc_mask)) {
@@ -430,9 +440,11 @@ __device__ __forceinline__ void *sb_alloc_in
 					break;
 			}
 			//ichunk = (ichunk + size_info->hash_step) % size_info->nchunks;
-			ichunk = (ichunk + size_info->hash_step * (itry * itry * itry + 1))
-				% size_info->nchunks;
-			//step = (step + size_info->hash_step) % size_info->nchunks;
+			//ichunk = (ichunk + size_info->hash_step * (itry * itry * itry + 1))
+			//	% size_info->nchunks;
+			//step = (step + 256) % size_info->hash_step;
+			uint step = ((itry + 1) * STEP_FREQ * nchunks) % size_info->hash_step;
+			ichunk = (ichunk + (itry + 1) * step) % size_info->nchunks;
 			//ichunk = (ichunk + size_info->hash_step) & (size_info->nchunks - 1);
 		}
 	}
@@ -443,8 +455,10 @@ __device__ __forceinline__ void *sb_alloc_in
 		//if(!sb_ctr_inc(size_id, isb, 1)) {
 		if(!(inc_mask & 1)) {
 			// reservation unsuccessful (slab was freed), cancel it
+			uint iword = ichunk / WORD_SZ;
+			uint ibit = ichunk % WORD_SZ;
 			uint alloc_mask = ((1 << nchunks) - 1) << ibit;
-			atomicAnd(block_bits + iword, ~alloc_mask | (old_word & alloc_mask));
+			atomicAnd(block_bits + iword, ~alloc_mask | old_word & alloc_mask);
 			sb_ctr_dec(isb, nchunks);
 			reserved = false;
 			needs_new_head = true;

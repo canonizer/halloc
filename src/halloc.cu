@@ -76,9 +76,11 @@ __device__ __forceinline__ uint size_ctr_inc(uint size_id) {
 		uint leader_size_id = size_id;
 		leader_size_id = __shfl((int)leader_size_id, leader_lid);
 		group_mask = __ballot(size_id == leader_size_id);
+		//group_mask = __ballot(1);
 
 		mask &= ~group_mask;
 		want_inc = want_inc && size_id != leader_size_id;
+		//want_inc = false;
 		// }
 	}  // while
 	if(lid == leader_lid)
