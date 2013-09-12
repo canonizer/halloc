@@ -48,4 +48,29 @@ typedef struct {
 /** maximum block size */
 #define MAX_BLOCK_SZ 3072
 
+
+
+// chunk manipulation
+uint chunk_val(uint chunk_sz) {
+	//return chunk_sz;
+	uint div3 = chunk_sz % 3 ? 1 : 3;
+	if(chunk_sz % 3 == 0)
+		chunk_sz /= 3;
+	uint sh = 0;
+	for(; (1 << sh) < chunk_sz; sh++);
+	return div3 << 16 | sh;
+}
+
+__host__ __device__ inline uint chunk_mul(uint v, uint chunk_sz) {
+	//return v * chunk_sz;
+	return (v << (chunk_sz & 0xffffu)) * (chunk_sz >> 16);
+}
+
+__host__ __device__ inline uint chunk_div(uint v, uint chunk_sz) {
+	// return v / chunk_sz
+	if(chunk_sz >> 16u == 3u)
+		v /= 3u;
+	return v >> (chunk_sz & 0xffffu);
+}
+
 #endif

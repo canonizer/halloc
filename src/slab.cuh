@@ -334,7 +334,6 @@ __device__ __forceinline__ uint new_sb_for_size
 	// try locking size id
 	// TODO: make those who failed to lock attempt to allocate
 	// in what free space left there
-	//uint64 t1 = clock64();
 	uint cur_head = *(volatile uint *)&head_sbs_g[ihead][size_id];
 	if(try_lock(&head_locks_g[ihead][size_id])) {
 		uint cur_head = *(volatile uint *)&head_sbs_g[ihead][size_id];
@@ -343,6 +342,7 @@ __device__ __forceinline__ uint new_sb_for_size
 		if(cur_head == SB_NONE || 
 			 sb_count(*(volatile uint *)&sb_counters_g[cur_head]) >=
 			 size_infos_g[size_id].busy_threshold) {
+			//uint64 t1 = clock64();
 			
 #if CACHE_HEAD_SBS
 			new_head = cached_sbs_g[ihead][size_id];
@@ -358,8 +358,8 @@ __device__ __forceinline__ uint new_sb_for_size
 				// TODO: check if this threadfence is necessary
 				//__threadfence();
 				// if(new_head != SB_NONE) {
-				//  	printf("new head = %d with count = %d\n", new_head, 
-				//  				 (uint)sb_count(sb_counters_g[new_head]));
+				//   	printf("new head = %d with count = %d\n", new_head, 
+				//   				 (uint)sb_count(sb_counters_g[new_head]));
 				// }
 				//printf("new head slab %d with count %d\n", new_head, 
 				//			 sb_count(sb_counters_g[new_head]));
@@ -376,14 +376,15 @@ __device__ __forceinline__ uint new_sb_for_size
 #endif
 				//__threadfence();
 			}  // if(found new head)
+			//uint64 t2 = clock64();
+			//printf("needed %lld cycles to find new head slabs\n", t2 - t1);
+
 		} else {
 			// looks like we read stale data at some point, just re-read head
 			new_head = *(volatile uint *)&head_sbs_g[ihead][size_id];
 		}
 		unlock(&head_locks_g[ihead][size_id]);
 		//__threadfence();
-		//uint64 t2 = clock64();
-		//printf("needed %lld cycles to find new head slabs\n", t2 - t1);
 		return new_head;
 	} else {
 		// someone else working on current head superblock; 
@@ -404,7 +405,7 @@ __device__ __forceinline__ uint new_sb_for_size
 			@returns the pointer to the allocated memory, or 0 if unable to allocate
 	*/
 __device__ __forceinline__ void *sb_alloc_in
-(uint ihead, uint isb, uint &ichunk, uint size_id, bool &needs_new_head) {
+(uint ihead, uint isb, uint ichunk0, uint &itry, uint size_id, bool &needs_new_head) {
 	size_info_t *size_info = &size_infos_g[size_id];
 	if(isb == SB_NONE) {
 		needs_new_head = true;
@@ -414,27 +415,32 @@ __device__ __forceinline__ void *sb_alloc_in
 	void *p = 0;
 	uint *block_bits = sb_block_bits(isb);
 	//superblock_t sb = sbs_g[isb];
-	uint nchunks = size_infos_g[size_id].nchunks_in_block;
+	//uint nchunks = size_infos_g[size_id].nchunks_in_block;
 	uint old_word;
 	bool reserved = false;
+	uint ichunk = ichunk0, inc_mask;
 	// iterate until successfully reserved
-	for(uint itry = 0; itry < MAX_NTRIES; itry++) {
+	//for(uint itry = 0; itry < MAX_NTRIES; itry++) {
+	//for(; itry % MAX_NTRIES < MAX_NTRIES - 1; itry++) {
+	do {
 		// try reserve
 		uint iword = ichunk / WORD_SZ;
 		uint ibit = ichunk % WORD_SZ;
-		uint alloc_mask = ((1 << nchunks) - 1) << ibit;
+		uint alloc_mask = ((1 << size_info->nchunks_in_block) - 1) << ibit;
 		old_word = atomicOr(block_bits + iword, alloc_mask);
 		if(!(old_word & alloc_mask)) {
 			// initial reservation successful
 			reserved = true;
+			//inc_mask = sb_ctr_inc
+			//	(size_id, size_info->chunk_id, isb, nchunks);
 			break;
 		} else {
 			if(~old_word & alloc_mask) {
 				// memory was partially allocated, need to roll back
 				atomicAnd(block_bits + iword, ~alloc_mask | (old_word & alloc_mask));
 			}
+			// check the counter
 			if(itry % CHECK_NTRIES == CHECK_NTRIES - 1) {
-				// check the counter
 				uint count = sb_count(*(volatile uint *)&sb_counters_g[isb]);
 				if(count >= size_info->busy_threshold)
 					break;
@@ -443,34 +449,39 @@ __device__ __forceinline__ void *sb_alloc_in
 			//ichunk = (ichunk + size_info->hash_step * (itry * itry * itry + 1))
 			//	% size_info->nchunks;
 			//step = (step + 256) % size_info->hash_step;
-			uint step = ((itry + 1) * STEP_FREQ * nchunks) % size_info->hash_step;
-			ichunk = (ichunk + (itry + 1) * step) % size_info->nchunks;
+			uint step = ((itry + 1) * STEP_FREQ * 
+									 size_info->nchunks_in_block) % size_info->hash_step;
+			ichunk = (ichunk0 + (itry + 1) * step) % size_info->nchunks;
+			//ichunk = (ichunk + (itry + 1) * step) % size_info->nchunks;
 			//ichunk = (ichunk + size_info->hash_step) & (size_info->nchunks - 1);
 		}
-	}
+	} while(++itry % MAX_NTRIES < MAX_NTRIES - 1);
+		//}
+	//itry++;
 	if(reserved) {
 		// increment counter
-		uint inc_mask = sb_ctr_inc
-			(size_id, size_info->chunk_id, isb, nchunks);
+		inc_mask = sb_ctr_inc
+			(size_id, size_info->chunk_id, isb, size_info->nchunks_in_block);
 		//if(!sb_ctr_inc(size_id, isb, 1)) {
 		if(!(inc_mask & 1)) {
 			// reservation unsuccessful (slab was freed), cancel it
 			uint iword = ichunk / WORD_SZ;
 			uint ibit = ichunk % WORD_SZ;
-			uint alloc_mask = ((1 << nchunks) - 1) << ibit;
+			uint alloc_mask = ((1 << size_info->nchunks_in_block) - 1) << ibit;
 			atomicAnd(block_bits + iword, ~alloc_mask | old_word & alloc_mask);
-			sb_ctr_dec(isb, nchunks);
+			//atomicAnd(block_bits + iword, ~alloc_mask);
+			sb_ctr_dec(isb, size_info->nchunks_in_block);
 			reserved = false;
 			needs_new_head = true;
 		} else {
 			if(inc_mask & 2)
 				needs_new_head = true;
 			void *sbptr = sbs_g[isb].ptr;
-			p = (char *)sbptr + ichunk * size_info->chunk_sz;
+			p = (char *)sbptr + chunk_mul(ichunk, size_info->chunk_sz);
 			// write allocation size
 			// TODO: support chunks of other size
 			uint *alloc_sizes = sb_alloc_sizes(isb);
-			sb_set_alloc_size(alloc_sizes, ichunk, nchunks);
+			sb_set_alloc_size(alloc_sizes, ichunk, size_info->nchunks_in_block);
 		}
 	} else
 		needs_new_head = true;

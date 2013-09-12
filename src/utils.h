@@ -94,9 +94,11 @@ __device__ inline uint warp_leader(uint mask) {
 
 /** gets the lane id inside the warp */
 __device__ inline uint lane_id(void) {
-	uint lid;
-	asm("mov.u32 %0, %laneid;" : "=r" (lid));
-	return lid;
+	//uint lid;
+	//asm("mov.u32 %0, %laneid;" : "=r" (lid));
+	//return lid;
+	// TODO: maybe use more reliable lane id computation
+	return threadIdx.x % WARP_SZ;
 }
 
 __device__ inline uint lanemask_lt() {

@@ -53,7 +53,7 @@ $falloc = 0.5;
 $ffree = 0.5;
 $fexec = 0.75;
 #foreach $group (10) {
-foreach $group (1, 5, 10) {
+foreach $group (0, 5, 10) {
 		foreach $niters (1, 5) {
 #		foreach $niters (1) {
 				$ntries = $group == 1 ? 1024 : 16384;

@@ -32,10 +32,10 @@ typedef struct {
 
 /** a step to check whether the slab can be moved to another free category */
 #define SB_FREE_STEP 2048
-/** maximum number of tries inside a superblock after which the allocation
+/** maximum number of tries inside a slab after which the allocation
 		attempt is abandoned */
 //#define MAX_NTRIES 128
-#define MAX_NTRIES 512
+#define MAX_NTRIES 64
 /** the number of steps after which count check needs be peformed, to ensure
 		that the allocator is not searching in a block that is already full */
 #define CHECK_NTRIES 8
@@ -46,7 +46,7 @@ typedef struct {
 /** whether to cache head slabs */
 #define CACHE_HEAD_SBS 1
 /** step frequency, i.e. what's the step for step update */
-#define STEP_FREQ 32
+#define STEP_FREQ 64
 
 /** positions and sizes related to slab counters */
 // modified values enable better reading of counters in hex

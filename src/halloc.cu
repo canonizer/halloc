@@ -100,33 +100,13 @@ __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
 	uint head_sb = *(volatile uint *)&head_sbs_g[ihead][size_id];
 	size_info_t *size_info = &size_infos_g[size_id];
 
-	// the counter is based on warp id
-	//uint tid = threadIdx.x + blockIdx.x * blockDim.x;
-	//uint wid = tid / WORD_SZ;
-	//uint lid = threadIdx.x % WORD_SZ;
-	uint lid = lane_id();
-	//uint leader_lid = warp_leader(__ballot(1));
-	uint leader_lid;
-	// TODO: 1 counter per size, distribute increments
-	//uint icounter = wid % NCOUNTERS;
-	//uint icounter = size_id;
-	//uint icounter = 0;
 	uint cv = size_ctr_inc(size_id);
-	// uint cv;
-	// if(lid == leader_lid)
-	//  	cv = atomicAdd(&counters_g[icounter], COUNTER_INC);
-	// cv = __shfl((int)cv, leader_lid);
 	void *p = 0;
-	// consider returning back to cubic hash on cv
 	// initial position
 #if MOSTLY_TID_HASH
 	uint ichunk = tid * THREAD_FREQ + cv * cv * (cv + 1);
 #else
-  //uint ichunk = (icounter + NCOUNTERS * cv) * WARP_SZ + lid;
-  //uint ichunk = (icounter + cv) * WARP_SZ + (lid + (uint)clock()) % WARP_SZ;
 	uint ichunk = cv;
-  //uint cv2 = cv / COUNTER_FREQ;
-  //ichunk = ichunk * THREAD_FREQ + cv2 * cv2 * cv2;
 	ichunk = ichunk * THREAD_FREQ;
 #endif
 	ichunk = ichunk * size_info->nchunks_in_block % size_info->nchunks;
@@ -136,35 +116,34 @@ __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
 	//uint res_mask = 0xc;
 	// use two-level loop to avoid warplocks
 	//uint ntries = 0;
+	uint itry = 0;
 	do {
 		if(want_alloc) {
 			//if(res_mask & 4)
 			// try allocating in head superblock
 			//head_sb = head_sbs_g[size_id];
-			p = sb_alloc_in(ihead, head_sb, ichunk, size_id, need_roomy_sb);
+			p = sb_alloc_in(ihead, head_sb, ichunk, itry, size_id, need_roomy_sb);
 			//p = sb_alloc_in(ihead, head_sb, ichunk, size_id, res_mask);
 			want_alloc = !p;
 			//assert(!want_alloc || need_roomy_sb);
 			while(__any(need_roomy_sb)) {
 				uint need_roomy_mask = __ballot(need_roomy_sb);
 				if(need_roomy_sb) {
-					leader_lid = warp_leader(need_roomy_mask);
+					uint leader_lid = warp_leader(need_roomy_mask);
 					uint leader_size_id = size_id;
 					leader_size_id = __shfl((int)leader_size_id, leader_lid);
 					// here try to check whether a new SB is really needed, and get the
 					// new SB
-					uint new_head_sb;
-					if(lid == leader_lid) {
+					if(lane_id() == leader_lid) {
 						//assert(!forced);
 						//if(forced)
 						//	printf("forced detaching head slab %d\n", head_sb);
-						new_head_sb = new_sb_for_size(size_id, size_info->chunk_id, ihead);
+						head_sb = new_sb_for_size(size_id, size_info->chunk_id, ihead);
 					}
 					if(size_id == leader_size_id) {
-						new_head_sb = __shfl((int)new_head_sb, leader_lid);
+						head_sb = __shfl((int)head_sb, leader_lid);
 						//if(new_head_sb != head_sb)
 						//	ntries = 0;
-						head_sb = new_head_sb;
 						want_alloc = want_alloc && head_sb != SB_NONE;
 						need_roomy_sb = false;
 					}
@@ -195,8 +174,11 @@ __device__ __forceinline__ void hafree_small(void *p, uint sb_id) {
 	uint *alloc_sizes = sb_alloc_sizes(sb_id);
 	// TODO: make the read volatile
 	uint chunk_sz = *(volatile uint *)&sbs_g[sb_id].chunk_sz;
+	uint ichunk = 
+		chunk_div((uint)((char *)p - (char *)sbs_g[sb_id].ptr), chunk_sz);
 	//uint chunk_sz = 16;
-	uint ichunk = (uint)((char *)p - (char *)sbs_g[sb_id].ptr) / chunk_sz;
+	//uint ichunk = 
+	//	(uint)((char *)p - (char *)sbs_g[sb_id].ptr) / chunk_sz;
 	uint nchunks = sb_get_reset_alloc_size(alloc_sizes, ichunk);
 	//assert(nchunks != 0);
 	//uint size_id = sbs_g[sb_id].size_id;
@@ -322,9 +304,10 @@ void ha_init(halloc_opts_t opts) {
 		uint block_sz = isize % 2 ? 3 * unit : 2 * unit;
 		uint nblocks = sb_sz / block_sz;
 		size_info->chunk_id = isize % 2 + (isize < nsizes / 2 ? 0 : 2);
-		size_info->chunk_sz = (size_info->chunk_id % 2 ? 3 : 2) * 
+		uint chunk_sz = (size_info->chunk_id % 2 ? 3 : 2) * 
 			(size_info->chunk_id / 2 ? 128 : 8);
-		size_info->nchunks_in_block = block_sz / size_info->chunk_sz;
+		size_info->chunk_sz = chunk_val(chunk_sz);
+		size_info->nchunks_in_block = block_sz / chunk_sz;
 		size_info->nchunks = nblocks * size_info->nchunks_in_block;
 		// TODO: use a better hash step
 		size_info->hash_step = size_info->nchunks_in_block *
