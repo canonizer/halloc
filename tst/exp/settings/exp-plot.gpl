@@ -1,0 +1,23 @@
+# fixed slab size, varying occupancy
+set terminal pdf enhanced color font ",10"
+set pointsize 0.65
+set style data linespoints
+
+set output "var-occup.pdf"
+set xlabel "Busy threshold"
+set ylabel "Speed, GiB/s"
+plot [][0:140] \
+	"<awk '$1==2 && $4==16' exp-log.csv" u 2:6 title "4x16B, 2MiB slab",\
+  "<awk '$1==2 && $4==256' exp-log.csv" u 2:6 title "1x256B, 2MiB slab",\
+  "<awk '$1==4 && $4==16' exp-log.csv" u 2:6 title "4x16B, 4MiB slab",\
+  "<awk '$1==4 && $4==256' exp-log.csv" u 2:6 title "1x256B, 4MiB slab"
+
+set output "var-threshold.pdf"
+set xlabel "Slab size, MiB"
+set ylabel "Speed, GiB/s"
+set logscale xy 2
+plot [0.9:9][4:200] \
+	"<awk '$2==0.835 && $4==16' exp-log.csv" u 1:6 title "4x16B, busy at 0.835",\
+	"<awk '$2==0.835 && $4==256' exp-log.csv" u 1:6 title "1x256B, busy at 0.835",\
+	"<awk '$2==0.945 && $4==16' exp-log.csv" u 1:6 title "4x16B, busy at 0.945",\
+	"<awk '$2==0.945 && $4==256' exp-log.csv" u 1:6 title "1x256B, busy at 0.945"
