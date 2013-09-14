@@ -1,0 +1,44 @@
+# fixed slab size, varying occupancy
+set terminal pdf enhanced color font ",10"
+set pointsize 0.65
+set style data linespoints
+
+set output "single-speed.pdf"
+set xlabel "Allocation size, B"
+set logscale x 2
+set ylabel "Speed, GiB/s"
+plot [12:4096][0:120] \
+	"exp-log-single.csv" u 1:2 title "Private",\
+  "exp-log-single.csv" u 1:4 title "Spree",\
+  "exp-log-single.csv" u 1:5 title "Spree malloc"
+
+set output "single-thru.pdf"
+set xlabel "Allocation size, B"
+set logscale xy 2
+set ylabel "Throughput, Mops/s"
+plot [12:4096][10:2000] \
+	"exp-log-single.csv" u 1:3 title "Private",\
+  "exp-log-single.csv" u 1:6 title "Spree",\
+  "exp-log-single.csv" u 1:7 title "Spree malloc"
+
+set style data boxes
+set boxwidth 0.225
+set style fill solid 0.6
+
+set output "combi-speed.pdf"
+set xlabel "Allocation size range, B"
+unset logscale xy
+set ylabel "Speed, GiB/s"
+plot [][0:160] \
+	"exp-log-combi.csv" u 0:2 title "Private",\
+  "exp-log-combi.csv" u ($0+0.25):4:xticlabels(1) title "Spree",\
+  "exp-log-combi.csv" u ($0+0.5):5 title "Spree malloc"
+
+set output "combi-thru.pdf"
+set xlabel "Allocation size range, B"
+set logscale y 2
+set ylabel "Throughput, Mops/s"
+plot [][16:2048] \
+	"exp-log-combi.csv" u 0:3 title "Private",\
+  "exp-log-combi.csv" u ($0+0.25):6:xticlabels(1) title "Spree",\
+  "exp-log-combi.csv" u ($0+0.5):7 title "Spree malloc"
