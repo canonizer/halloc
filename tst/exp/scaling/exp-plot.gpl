@@ -17,7 +17,7 @@ set output "4x16b-thru.pdf"
 set xlabel "#threads"
 set logscale x 2
 set ylabel "Throughput, Mops/s"
-plot [1024:2*1024*1024][0:2000] \
+plot [1024:2*1024*1024][0:2500] \
 	"<awk '$1==16 && $2==4' exp-log-thru.csv" u 3:4 title "Private",\
 	"<awk '$1==16 && $2==4' exp-log-thru.csv" u 3:5 title "Spree",\
 	"<awk '$1==16 && $2==4' exp-log-thru.csv" u 3:6 title "Spree malloc",\
@@ -38,7 +38,7 @@ set output "1x16b-lat-malloc.pdf"
 set xlabel "#threads"
 set logscale xy 2
 set ylabel "Latency, cycles"
-plot [0.5:2*1024*1024][256:256*1024] \
+plot [0.5:2*1024*1024][256:48*1024] \
 	"<awk '$1==16 && $2==1' exp-log-lat.csv" u 3:4 title "Min",\
 	"<awk '$1==16 && $2==1' exp-log-lat.csv" u 3:5 title "Avg",\
 	"<awk '$1==16 && $2==1' exp-log-lat.csv" u 3:6 title "Max"
@@ -47,7 +47,7 @@ set output "1x256b-lat-malloc.pdf"
 set xlabel "#threads"
 set logscale xy 2
 set ylabel "Latency, cycles"
-plot [0.5:2*1024*1024][256:256*1024] \
+plot [0.5:2*1024*1024][256:768*1024] \
 	"<awk '$1==256 && $2==1' exp-log-lat.csv" u 3:4 title "Min",\
 	"<awk '$1==256 && $2==1' exp-log-lat.csv" u 3:5 title "Avg",\
 	"<awk '$1==256 && $2==1' exp-log-lat.csv" u 3:6 title "Max"

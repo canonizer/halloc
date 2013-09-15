@@ -101,4 +101,4 @@ sub combi_size {
 single_size();
 combi_size();
 # run gnuplot
-#system('gnuplot', './exp-plot.gpl');
+system('gnuplot', './exp-plot.gpl');

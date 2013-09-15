@@ -1,0 +1,10 @@
+# plots results of internal fragmentation experiments
+
+set terminal pdf enhanced color
+set style data lines
+
+set output "frag-int.pdf"
+set xlabel "Allocation size, B"
+set ylabel "Average internal fragmentation"
+plot [0:256][] \
+		 "exp-log.csv" u 1:4 t "Average"

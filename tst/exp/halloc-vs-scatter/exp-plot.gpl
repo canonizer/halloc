@@ -1,0 +1,48 @@
+# fixed slab size, varying occupancy
+set terminal pdf enhanced color font ",10"
+set pointsize 0.65
+set style data linespoints
+
+set output "vs-priv.pdf"
+set logscale y 2
+set xlabel "Allocation fraction"
+set ylabel "Throughput, Mops/s"
+plot [0.19:0.35][2:4096] \
+	"<awk '$1==\"halloc\"&&$2==16' exp-log-priv.csv" \
+				u 4:5 title "4x16B, Halloc",\
+	"<awk '$1==\"halloc\"&&$2==64' exp-log-priv.csv" \
+				u 4:5 title "1x64B, Halloc",\
+	"<awk '$1==\"scatter\"&&$2==16' exp-log-priv.csv" \
+				u 4:5 title "4x16B, ScatterAlloc",\
+	"<awk '$1==\"scatter\"&&$2==64' exp-log-priv.csv" \
+				u 4:5 title "1x64B, ScatterAlloc"
+
+
+set output "vs-spree-malloc.pdf"
+set logscale y 2
+set xlabel "#threads"
+set ylabel "Throughput, Mops/s"
+plot [][0.8:16384] \
+	"<awk '$1==\"halloc\"&&$2==16' exp-log-spree.csv" \
+				u 4:6 title "4x16B, Halloc",\
+	"<awk '$1==\"halloc\"&&$2==64' exp-log-spree.csv" \
+				u 4:6 title "1x64B, Halloc",\
+	"<awk '$1==\"scatter\"&&$2==16' exp-log-spree.csv" \
+				u 4:6 title "4x16B, ScatterAlloc",\
+	"<awk '$1==\"scatter\"&&$2==64' exp-log-spree.csv" \
+				u 4:6 title "1x64B, ScatterAlloc"
+
+
+set output "vs-spree-free.pdf"
+set logscale y 2
+set xlabel "#threads"
+set ylabel "Throughput, Mops/s"
+plot [][0.8:16384] \
+	"<awk '$1==\"halloc\"&&$2==16' exp-log-spree.csv" \
+				u 4:7 title "4x16B, Halloc",\
+	"<awk '$1==\"halloc\"&&$2==64' exp-log-spree.csv" \
+				u 4:7 title "1x64B, Halloc",\
+	"<awk '$1==\"scatter\"&&$2==16' exp-log-spree.csv" \
+				u 4:7 title "4x16B, ScatterAlloc",\
+	"<awk '$1==\"scatter\"&&$2==64' exp-log-spree.csv" \
+				u 4:7 title "1x64B, ScatterAlloc"

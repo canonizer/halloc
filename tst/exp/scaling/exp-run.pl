@@ -92,4 +92,4 @@ sub lat_test {
 thru_test();
 lat_test();
 # run gnuplot
-#system('gnuplot', './exp-plot.gpl');
+system('gnuplot', './exp-plot.gpl');
