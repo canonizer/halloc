@@ -24,6 +24,15 @@
 										 cudaMemcpyHostToDevice));									\
 }  // cuset
 
+/** gets the value of the CUDA device variable */
+#define cuget(pval, symbol)																\
+{																													\
+	void *cuget_addr;																				\
+	cucheck(cudaGetSymbolAddress(&cuget_addr, symbol));			\
+	cucheck(cudaMemcpy((pval), cuget_addr, sizeof(*(pval)), \
+										 cudaMemcpyDeviceToHost));						\
+}
+
 #define cuset_arr(symbol, val)												\
 {																											\
 	void *cuset_addr;																		\
@@ -52,6 +61,10 @@ typedef unsigned long long uint64;
 #define MAX_NSBS 4096
 /** the size of SB set, in words; the number of used SBs can be smaller */
 #define SB_SET_SZ (MAX_NSBS / WORD_SZ)
+
+/** division with rounding upwards, useful for kernel calls */
+inline __host__ __device__ int divup
+(int a, int b) { return a / b + (a % b ? 1 : 0); }
 
 /** checks whether the step is in mask */
 __device__ inline bool step_is_in_mask(uint mask, uint val) {

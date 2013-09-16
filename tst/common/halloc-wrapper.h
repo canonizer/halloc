@@ -26,6 +26,10 @@ public:
 		hafree(p);
 	}
 
+	static double extfrag(bool ideal) {
+		return ha_extfrag(ideal);
+	}
+
 	static void shutdown(void) {
 		ha_shutdown();
 	}

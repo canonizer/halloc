@@ -22,6 +22,7 @@
 #include "sbset.cuh"
 #include "size-info.cuh"
 #include "slab.cuh"
+#include "statistics.cuh"
 
 #define MOSTLY_TID_HASH 0
 
@@ -220,10 +221,6 @@ void ha_init(halloc_opts_t opts) {
 	cucheck(cudaGetDeviceProperties(&dev_prop, dev));
 	dev_memory = dev_prop.totalGlobalMem;
 	uint sb_sz = 1 << opts.sb_sz_sh;
-	uint nsbs = dev_memory / sb_sz;
-	cuset(nsbs_g, uint, nsbs);
-	cuset(sb_sz_g, uint, sb_sz);
-	cuset(sb_sz_sh_g, uint, opts.sb_sz_sh);
 
 	// limit memory available to 3/4 of device memory
 	opts.memory = min((uint64)opts.memory, 3ull * dev_memory / 4ull);
@@ -232,6 +229,15 @@ void ha_init(halloc_opts_t opts) {
 	uint64 halloc_memory = opts.halloc_fraction * opts.memory;
 	uint64 cuda_memory = opts.memory - halloc_memory;
 	cucheck(cudaDeviceSetLimit(cudaLimitMallocHeapSize, cuda_memory));
+	cuset(cuda_mem_g, uint64, cuda_memory);
+	cuset(total_mem_g, uint64, halloc_memory + cuda_memory);
+
+	// set the number of slabs
+	//uint nsbs = dev_memory / sb_sz;
+	uint nsbs = halloc_memory / sb_sz;
+	cuset(nsbs_g, uint, nsbs);
+	cuset(sb_sz_g, uint, sb_sz);
+	cuset(sb_sz_sh_g, uint, opts.sb_sz_sh);
 
 	// allocate a fixed number of superblocks, copy them to device
 	uint nsbs_alloc = (uint)min((uint64)nsbs, (uint64)halloc_memory / sb_sz);

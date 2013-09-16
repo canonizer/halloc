@@ -13,3 +13,8 @@ __constant__ uint sb_sz_sh_g;
 
 /** real number of sizes */
 __constant__ uint nsizes_g;
+
+/** slab descriptors */
+__device__ superblock_t sbs_g[MAX_NSBS];
+/** slab (non-distributed) counters */
+__device__ uint sb_counters_g[MAX_NSBS];

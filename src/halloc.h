@@ -45,6 +45,12 @@ void ha_init(halloc_opts_t opts = halloc_opts_t());
 /** shuts down memory allocator host-side */
 void ha_shutdown(void);
 
+/** gets current external fragmentation 
+		@param ideal whether the ideal case is considered, i.e. all slabs do really
+		get allocated from CUDA allocator memory; currently ignored and assumed false
+ */
+double ha_extfrag(bool ideal);
+
 // overrides for malloc and free if requested; currently unstable
 //#ifdef HALLOC_OVERRIDE_STDC
 #if 0

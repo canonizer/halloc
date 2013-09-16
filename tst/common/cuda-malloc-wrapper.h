@@ -19,6 +19,10 @@ public:
 		::free(p);
 	}
 
+	static double extfrag(bool ideal) {
+		return 0;
+	}
+
 	static void shutdown(void) {}
 
 }; 

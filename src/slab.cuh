@@ -13,10 +13,6 @@ __constant__ uint nsb_bit_words_sh_g;
 /** number of alloc sizes per superblock */
 __constant__ uint nsb_alloc_words_g;
 
-/** slab descriptors */
-__device__ superblock_t sbs_g[MAX_NSBS];
-/** slab (non-distributed) counters */
-__device__ uint sb_counters_g[MAX_NSBS];
 /** slab locks; acquiring lock required to modify the lower part 
 		of the counter */
 __device__ uint sb_locks_g[MAX_NSBS];
