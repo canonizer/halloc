@@ -124,7 +124,6 @@ __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
 			// try allocating in head superblock
 			//head_sb = head_sbs_g[size_id];
 			p = sb_alloc_in(ihead, head_sb, ichunk, itry, size_id, need_roomy_sb);
-			//p = sb_alloc_in(ihead, head_sb, ichunk, size_id, res_mask);
 			want_alloc = !p;
 			//assert(!want_alloc || need_roomy_sb);
 			while(__any(need_roomy_sb)) {

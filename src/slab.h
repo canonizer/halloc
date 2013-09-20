@@ -34,11 +34,11 @@ typedef struct {
 #define SB_FREE_STEP 2048
 /** maximum number of tries inside a slab after which the allocation
 		attempt is abandoned */
-//#define MAX_NTRIES 64
+//#define MAX_NTRIES 32
 #define MAX_NTRIES 32
 /** the number of steps after which count check needs be peformed, to ensure
 		that the allocator is not searching in a block that is already full */
-#define CHECK_NTRIES 8
+#define CHECK_NTRIES 2
 /** a "no-sb" constant */
 #define SB_NONE (~0)
 /** number of heads between which to distribute allocations */

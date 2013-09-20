@@ -143,6 +143,7 @@ __device__ __forceinline__ uint sb_ctr_inc
 		return_mask &= ~1;
 	uint old_count = sb_count(old_counter);
 	uint threshold = size_infos_g[size_id].busy_threshold;
+	//if(old_count + change > threshold)
 	if(old_count + change >= threshold && old_count < threshold)
 		return_mask |= 2;
 	return return_mask;
@@ -439,7 +440,7 @@ __device__ __forceinline__ uint new_sb_for_size
 	*/
 __device__ __forceinline__ void *sb_alloc_in
 (uint ihead, uint isb, uint ichunk0, uint &itry, uint size_id, bool &needs_new_head) {
-	size_info_t *size_info = &size_infos_g[size_id];
+	const size_info_t *size_info = &size_infos_g[size_id];
 	if(isb == SB_NONE) {
 		needs_new_head = true;
 		return 0;
@@ -465,7 +466,7 @@ __device__ __forceinline__ void *sb_alloc_in
 			// initial reservation successful
 			reserved = true;
 			//inc_mask = sb_ctr_inc
-			//	(size_id, size_info->chunk_id, isb, nchunks);
+			//	(size_id, size_info->chunk_id, isb, size_info->nchunks_in_block);
 			break;
 		} else {
 			if(~old_word & alloc_mask) {
@@ -501,8 +502,8 @@ __device__ __forceinline__ void *sb_alloc_in
 			uint iword = ichunk / WORD_SZ;
 			uint ibit = ichunk % WORD_SZ;
 			uint alloc_mask = ((1 << size_info->nchunks_in_block) - 1) << ibit;
-			atomicAnd(block_bits + iword, ~alloc_mask | old_word & alloc_mask);
-			//atomicAnd(block_bits + iword, ~alloc_mask);
+			//atomicAnd(block_bits + iword, ~alloc_mask | old_word & alloc_mask);
+			atomicAnd(block_bits + iword, ~alloc_mask);
 			sb_ctr_dec(isb, size_info->nchunks_in_block);
 			reserved = false;
 			needs_new_head = true;
