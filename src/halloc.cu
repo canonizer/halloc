@@ -339,6 +339,7 @@ void ha_init(halloc_opts_t opts) {
 	// zero out sets (but have some of the free set)
 	//fprintf(stderr, "started cuda-memsetting\n");
 	//cuvar_memset(unallocated_sbs_g, 0, sizeof(unallocated_sbs_g));
+	cuvar_memset(busy_sbs_g, 0, sizeof(roomy_sbs_g));
 	cuvar_memset(roomy_sbs_g, 0, sizeof(roomy_sbs_g));
 	cuvar_memset(sparse_sbs_g, 0, sizeof(sparse_sbs_g));
 	//cuvar_memset(roomy_sbs_g, 0, (MAX_NSIZES * SB_SET_SZ * sizeof(uint)));

@@ -6,5 +6,7 @@ set style data lines
 set output "frag-int.pdf"
 set xlabel "Allocation size, B"
 set ylabel "Average internal fragmentation"
-plot [0:256][] \
+plot [0:3072][] \
+		 "exp-log.csv" u 1:2 t "Block",\
+		 "exp-log.csv" u 1:3 t "Cumulative",\
 		 "exp-log.csv" u 1:4 t "Average"

@@ -25,6 +25,8 @@ __device__ sbset_t free_sbs_g;
 __device__ sbset_t sparse_sbs_g[MAX_NCHUNK_IDS];
 /** the set of "roomy" slabs for the size */
 __device__ sbset_t roomy_sbs_g[MAX_NSIZES];
+/** the set of "busy" slabs for the size */
+__device__ sbset_t busy_sbs_g[MAX_NSIZES];
 
 /** head superblocks for each size */
 __device__ uint head_sbs_g[NHEADS][MAX_NSIZES];
@@ -154,7 +156,7 @@ __device__ __forceinline__ void sb_ctr_dec(uint sb_id, uint nchunks) {
 	bool want_inc = true;
 	uint mask, lid = lane_id();
 	while(mask = __ballot(want_inc)) {
-	//while(want_inc) {
+		//while(want_inc) {
 		//mask = __ballot(want_inc);
 		uint leader_lid = warp_leader(mask), leader_sb_id = sb_id;
 		uint leader_nchunks = nchunks;
@@ -173,31 +175,40 @@ __device__ __forceinline__ void sb_ctr_dec(uint sb_id, uint nchunks) {
 				uint chunk_id = sbs_g[sb_id].chunk_id;
 				if(size_id != SZ_NONE && chunk_id != SZ_NONE) {
 					// slab is non-head, so do manipulations
-					uint old_count = sb_count(old_counter), new_count = old_count - change;
-					uint roomy_threshold = size_infos_g[size_id].roomy_threshold;
-					if(new_count <= roomy_threshold && old_count > roomy_threshold) {
-						// mark superblock as roomy for current size
-						sbset_add_to(roomy_sbs_g[size_id], sb_id);
+					uint old_count = sb_count(old_counter);
+					uint new_count = old_count - change;
+					uint busy_threshold = size_infos_g[size_id].busy_threshold;
+					if(new_count <= busy_threshold && old_count > busy_threshold) {
+						sbset_add_to(busy_sbs_g[size_id], sb_id);
 					} else {
-						uint sparse_threshold = size_infos_g[size_id].sparse_threshold;
-						//uint chunk_id = sb_chunk_id(old_counter);
-						if(new_count <= sparse_threshold && 
-							 old_count > sparse_threshold)	{
-							sbset_add_to(sparse_sbs_g[chunk_id], sb_id);
+						uint roomy_threshold = size_infos_g[size_id].roomy_threshold;
+						if(new_count <= roomy_threshold && old_count > roomy_threshold) {
+							// mark superblock as roomy for current size
+							sbset_add_to(roomy_sbs_g[size_id], sb_id);
 							__threadfence();
-							sbset_remove_from(roomy_sbs_g[size_id], sb_id);
-							sbset_add_to(sparse_sbs_g[chunk_id], sb_id);
-						}	else if(new_count == 0) {
-							if(sb_chunk_id(old_counter) != (SZ_NONE & ((1 << SB_CHUNK_SZ) - 1))) {
-								lock(&sb_locks_g[sb_id]);
-								// read size_id and chunk_id anew
-								size_id = *(volatile uint *)&sbs_g[sb_id].size_id;
-								chunk_id = *(volatile uint *)&sbs_g[sb_id].chunk_id;
-								sb_try_mark_free(sb_id, size_id, chunk_id, false);
-								//sb_try_mark_free(sb_id, size_id, chunk_id);
-								unlock(&sb_locks_g[sb_id]);
-							}
-						}  // if(slab position in sets changes)
+							sbset_remove_from(busy_sbs_g[size_id], sb_id);
+							sbset_add_to(roomy_sbs_g[size_id], sb_id);
+						} else {
+							uint sparse_threshold = size_infos_g[size_id].sparse_threshold;
+							//uint chunk_id = sb_chunk_id(old_counter);
+							if(new_count <= sparse_threshold && 
+								 old_count > sparse_threshold)	{
+								sbset_add_to(sparse_sbs_g[chunk_id], sb_id);
+								__threadfence();
+								sbset_remove_from(roomy_sbs_g[size_id], sb_id);
+								sbset_add_to(sparse_sbs_g[chunk_id], sb_id);
+							}	else if(new_count == 0) {
+								if(sb_chunk_id(old_counter) != (SZ_NONE & ((1 << SB_CHUNK_SZ) - 1))) {
+									lock(&sb_locks_g[sb_id]);
+									// read size_id and chunk_id anew
+									size_id = *(volatile uint *)&sbs_g[sb_id].size_id;
+									chunk_id = *(volatile uint *)&sbs_g[sb_id].chunk_id;
+									sb_try_mark_free(sb_id, size_id, chunk_id, false);
+									//sb_try_mark_free(sb_id, size_id, chunk_id);
+									unlock(&sb_locks_g[sb_id]);
+								}
+							}  // if(slab position in sets changes)
+						}
 					}
 				}
 			}  // if(not a head slab) 
@@ -215,8 +226,8 @@ __device__ __forceinline__ void detach_head(uint head) {
 	uint count = sb_count(old_counter);
 	//uint size_id = sb_size_id(old_counter);
 	uint size_id = sbs_g[head].size_id;
-	uint roomy_threshold = size_infos_g[size_id].roomy_threshold;
-	if(count <= roomy_threshold) {
+	uint busy_threshold = size_infos_g[size_id].roomy_threshold;
+	if(count <= busy_threshold) {
 		//uint chunk_id = sb_chunk_id(old_counter);
 		uint chunk_id = sbs_g[head].chunk_id;
 		if(count == 0) {
@@ -224,10 +235,13 @@ __device__ __forceinline__ void detach_head(uint head) {
 			//sb_try_mark_free(head, size_id, chunk_id);
 		} else {
 			uint sparse_threshold = size_infos_g[chunk_id].sparse_threshold;
+			uint roomy_threshold = size_infos_g[chunk_id].roomy_threshold;
 			if(count <= sparse_threshold) {
 				sbset_add_to(sparse_sbs_g[chunk_id], head);
-			} else {
+			} else if(count <= roomy_threshold) {
 				sbset_add_to(roomy_sbs_g[size_id], head);
+			} else {
+				sbset_add_to(busy_sbs_g[size_id], head);
 			}
 		}  // if(free)
 	}  // if(at least roomy)
@@ -246,13 +260,17 @@ __device__ __forceinline__ uint find_sb_for_size(uint size_id, uint chunk_id) {
 		// try set head
 		lock(&sb_locks_g[new_head]);
 		bool found = false;
-		if(!sbs_g[new_head].is_head && sbs_g[new_head].size_id == size_id
-			 && sb_count(sb_counters_g[new_head]) <= size_infos_g[size_id].roomy_threshold) {
-			found = true;
-			*(volatile bool *)&sbs_g[new_head].is_head = true;
-			// ensure that the counter is updated
-			if(!sb_set_head(&sb_counters_g[new_head]))
-				dummy_g = 1;
+		if(!sbs_g[new_head].is_head && sbs_g[new_head].size_id == size_id) {
+			if(sb_count(sb_counters_g[new_head]) <= size_infos_g[size_id].roomy_threshold) {
+				found = true;
+				*(volatile bool *)&sbs_g[new_head].is_head = true;
+				// ensure that the counter is updated
+				if(!sb_set_head(&sb_counters_g[new_head]))
+					dummy_g = 1;
+			} else {
+				// return to busy slabs
+				sbset_add_to(busy_sbs_g[size_id], new_head);
+			}
 		}
 		unlock(&sb_locks_g[new_head]);
 		if(found)
@@ -317,6 +335,25 @@ __device__ __forceinline__ uint find_sb_for_size(uint size_id, uint chunk_id) {
 				break;
 		}  // if(got new head from free slabs)
 	}	
+
+	// try getting from busy slabs; this is really the last resort
+	if(new_head == SB_NONE) {
+		while((new_head = sbset_get_from(busy_sbs_g[size_id])) != SB_NONE) {
+			// try set head
+			lock(&sb_locks_g[new_head]);
+			bool found = false;
+			if(!sbs_g[new_head].is_head && sbs_g[new_head].size_id == size_id) {
+				found = true;
+				*(volatile bool *)&sbs_g[new_head].is_head = true;
+				// ensure that the counter is updated
+				if(!sb_set_head(&sb_counters_g[new_head]))
+					dummy_g = 1;
+			}
+			unlock(&sb_locks_g[new_head]);
+			if(found)
+				break;
+		}  // while(searching through new heads)
+	}
 	return new_head;
 	// TODO: request additional memory from CUDA allocator
 }  // find_sb_for_size
