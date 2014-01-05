@@ -17,15 +17,13 @@ typedef struct {
 	/** slab size id 
 			TODO: check if we really need it
 	 */
-	uint size_id;
+	unsigned int size_id;
+	/** whether this is a head slab */
+	unsigned int is_head;
 	/** slab chunk id */
-	uint chunk_id;
+	unsigned int chunk_id;
 	/** slab chunk size */
 	uint chunk_sz;
-	/** whether this is a head slab */
-	uint is_head;
-	/** slab flags */
-	//uint flags;
 	/** pointer to memory owned by superblock */
 	void *ptr;
 } superblock_t;

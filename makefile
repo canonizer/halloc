@@ -8,11 +8,12 @@ TGT=bin/$(NAME)
 
 TMP=*~ \\\#* src/*~ src/\\\#* tst/corr/*~ tst/corr/*.o $(TGT) $(TEST_TGT)
 
+# be careful: using cs modifier can lead to subtle errors, though increases performance
 build: $(TGT)
 $(TGT):	$(SRC) makefile
-	nvcc -arch=sm_35 -O3 -lib -rdc=true -o $(TGT) $(SRC_C)
+	nvcc -arch=sm_35 -O3 -lib -rdc=true -Xptxas -dlcm=cg -Xptxas -dscm=cg -o $(TGT) $(SRC_C)
+#	nvcc -arch=sm_35 -O3 -lib -rdc=true -Xptxas -dlcm=cs -Xptxas -dscm=cs -o $(TGT) $(SRC_C)
 #	nvcc -arch=sm_35 -O3 -lib -rdc=true -o $(TGT) $(SRC_C)
-#	nvcc -g -G -arch=sm_35 -O3 -lib -rdc=true -o $(TGT) $(SRC_C)
 
 #test: $(TGT) makefile
 #	make -C tst/corr/test run

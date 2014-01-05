@@ -58,7 +58,8 @@ typedef unsigned long long uint64;
 /** the warp size (32 on current NVidia architectures) */
 #define WARP_SZ 32
 /** maximum number of superblocks */
-#define MAX_NSBS 4096
+//#define MAX_NSBS 4096
+#define MAX_NSBS 2048
 /** the size of SB set, in words; the number of used SBs can be smaller */
 #define SB_SET_SZ (MAX_NSBS / WORD_SZ)
 
@@ -107,19 +108,37 @@ __device__ inline uint warp_leader(uint mask) {
 
 /** gets the lane id inside the warp */
 __device__ inline uint lane_id(void) {
-	//uint lid;
-	//asm("mov.u32 %0, %laneid;" : "=r" (lid));
-	//return lid;
+	uint lid;
+	asm("mov.u32 %0, %%laneid;" : "=r" (lid));
+	return lid;
 	// TODO: maybe use more reliable lane id computation
-	return threadIdx.x % WARP_SZ;
+	//return threadIdx.x % WARP_SZ;
 }
+
+/** loads the data with caching */
+__device__ inline uint ldca(const uint *p) {
+	uint res;
+	asm("ld.global.ca.u32 %0, [%1];": "=r"(res) : "l"(p));
+	return res;
+}  
+
+__device__ inline uint64 ldca(const uint64 *p) {
+	uint64 res;
+	asm("ld.global.ca.u64 %0, [%1];": "=l"(res) : "l"(p));
+	return res;
+}  
+
+__device__ inline void *ldca(void * const *p) {
+	void *res;
+	asm("ld.global.ca.u64 %0, [%1];": "=l"(res) : "l"(p));
+	return res;
+}  
 
 __device__ inline uint lanemask_lt() {
 	uint mask;
-	asm("mov.u32 %0, %lanemask_lt;" : "=r" (mask));
+	asm("mov.u32 %0, %%lanemask_lt;" : "=r" (mask));
 	return mask;
 }
-
 
 /** find the largest prime number below this one, and not dividing this one */
 uint max_prime_below(uint n);

@@ -2,9 +2,9 @@
 
 /** base address of the grid; this is the start address of the grid. It is
 		always aligned to superblock size boundary */
-void * __constant__ base_addr_g;
-/** superblock grid */
-__device__ uint64 sb_grid_g[2 * MAX_NSBS];
+static void * __constant__ base_addr_g;
+/** superblock grid; TODO: cache in L1, this helps */
+__attribute__((aligned(128))) static __device__ uint64 sb_grid_g[2 * MAX_NSBS];
 
 //extern __constant__ uint sb_sz_g;
 //extern __constant__ uint sb_sz_sh_g;
@@ -66,7 +66,8 @@ __device__ inline uint64 grid_cell(void *p, uint *icell) {
 	// TODO: handle stale cell data
 	//*icell = ((char *)p - (char *)base_addr_g) / sb_sz_g;
 	*icell = ((char *)p - (char *)base_addr_g) >> sb_sz_sh_g;
-	return sb_grid_g[*icell];
+	//return sb_grid_g[*icell];
+	return ldca(sb_grid_g + *icell);
 }
 /** gets the (de)allocation size id for the pointer */
 __device__ inline uint grid_size_id(uint icell, uint64 cell, void *p) {

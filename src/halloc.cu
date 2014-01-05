@@ -110,7 +110,7 @@ __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
 	uint ichunk = cv;
 	ichunk = ichunk * THREAD_FREQ;
 #endif
-	ichunk = ichunk * size_info->nchunks_in_block % size_info->nchunks;
+	ichunk = ichunk * ldca(&size_info->nchunks_in_block) % ldca(&size_info->nchunks);
   //ichunk = ichunk * size_info->nchunks_in_block & (size_info->nchunks - 1);
 	// main allocation loop
 	bool want_alloc = true, need_roomy_sb = false;
@@ -138,7 +138,7 @@ __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
 						//assert(!forced);
 						//if(forced)
 						//	printf("forced detaching head slab %d\n", head_sb);
-						head_sb = new_sb_for_size(size_id, size_info->chunk_id, ihead);
+						head_sb = new_sb_for_size(size_id, ldca(&size_info->chunk_id), ihead);
 					}
 					if(size_id == leader_size_id) {
 						head_sb = __shfl((int)head_sb, leader_lid);
@@ -172,13 +172,14 @@ __device__ void *hamalloc(uint nbytes) {
 /** procedure for small free*/
 __device__ __forceinline__ void hafree_small(void *p, uint sb_id) {
 	uint *alloc_sizes = sb_alloc_sizes(sb_id);
-	// TODO: make the read volatile
 	uint chunk_sz = *(volatile uint *)&sbs_g[sb_id].chunk_sz;
-	uint ichunk = 
-		chunk_div((uint)((char *)p - (char *)sbs_g[sb_id].ptr), chunk_sz);
-	//uint chunk_sz = 16;
 	//uint ichunk = 
-	//	(uint)((char *)p - (char *)sbs_g[sb_id].ptr) / chunk_sz;
+	//	chunk_div((uint)((char *)p - (char *)ldca(&sbs_g[sb_id].ptr)), chunk_sz);
+	// TODO: separate slab's pointer from the rest of the structure
+	uint ichunk = 
+		chunk_div((uint)((char *)p - (char *)ldca(&sb_ptrs_g[sb_id])), chunk_sz);
+	// uint ichunk = 
+	// 	chunk_div((uint)((char *)p - (char *)sbs_g[sb_id].ptr), chunk_sz);
 	uint nchunks = sb_get_reset_alloc_size(alloc_sizes, ichunk);
 	//assert(nchunks != 0);
 	//uint size_id = sbs_g[sb_id].size_id;
@@ -206,8 +207,9 @@ __device__ void hafree(void *p) {
 	uint sb_id = grid_sb_id(icell, cell, p);
 	if(sb_id != GRID_SB_NONE)
 		hafree_small(p, sb_id);
-	else
+	else {
 		hafree_large(p);
+	}
 }  // hafree
 
 void ha_init(halloc_opts_t opts) {
@@ -220,6 +222,9 @@ void ha_init(halloc_opts_t opts) {
 	cucheck(cudaGetDeviceProperties(&dev_prop, dev));
 	dev_memory = dev_prop.totalGlobalMem;
 	uint sb_sz = 1 << opts.sb_sz_sh;
+
+	// set cache configuration
+	//cucheck(cudaDeviceSetCacheConfig(cudaFuncCachePreferL1));
 
 	// limit memory available to 3/4 of device memory
 	opts.memory = min((uint64)opts.memory, 3ull * dev_memory / 4ull);
@@ -241,8 +246,11 @@ void ha_init(halloc_opts_t opts) {
 	// allocate a fixed number of superblocks, copy them to device
 	uint nsbs_alloc = (uint)min((uint64)nsbs, (uint64)halloc_memory / sb_sz);
 	size_t sbs_sz = MAX_NSBS * sizeof(superblock_t);
+	size_t sb_ptrs_sz = MAX_NSBS * sizeof(void *);
 	superblock_t *sbs = (superblock_t *)malloc(sbs_sz);
-	memset(sbs, 0, MAX_NSBS * sizeof(superblock_t));
+	void **sb_ptrs = (void **)malloc(sb_ptrs_sz);
+	memset(sbs, 0, sbs_sz);
+	memset(sb_ptrs, 0, sb_ptrs_sz);
 	uint *sb_counters = (uint *)malloc(MAX_NSBS * sizeof(uint));
 	memset(sbs, 0xff, MAX_NSBS * sizeof(uint));
 	char *base_addr = (char *)~0ull;
@@ -257,11 +265,13 @@ void ha_init(halloc_opts_t opts) {
 		//sbs[isb].state = SB_FREE;
 		//sbs[isb].mutex = 0;
 		cucheck(cudaMalloc(&sbs[isb].ptr, sb_sz));
+		sb_ptrs[isb] = sbs[isb].ptr;
 		base_addr = (char *)min((uint64)base_addr, (uint64)sbs[isb].ptr);
 	}
 	//cuset_arr(sbs_g, (superblock_t (*)[MAX_NSBS])&sbs);
 	cuset_arr(sbs_g, (superblock_t (*)[MAX_NSBS])sbs);
 	cuset_arr(sb_counters_g, (uint (*)[MAX_NSBS])sb_counters);
+	cuset_arr(sb_ptrs_g, (void* (*)[MAX_NSBS])sb_ptrs);
 	// also mark free superblocks in the set
 	sbset_t free_sbs;
 	memset(free_sbs, 0, sizeof(free_sbs));

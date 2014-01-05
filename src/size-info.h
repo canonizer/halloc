@@ -6,8 +6,6 @@
 /** size information type; this is non-changing information, to be stored in
 		constant memory */
 typedef struct {
-	/** block size */
-	//uint block_sz;
 	/** number of chunks in slab */
 	uint nchunks;
 	/** size of a single chunk */
@@ -25,7 +23,7 @@ typedef struct {
 	uint roomy_threshold;
 	/** threshold (in chunks) for the slab to be declared "busy" and be detached */
 	uint busy_threshold;
-} size_info_t;
+} size_info_t __attribute__((aligned(32)));
 
 /** maximum number of sizes supported */
 #define MAX_NSIZES 64
@@ -47,8 +45,6 @@ typedef struct {
 #define MIN_BLOCK_SZ 16
 /** maximum block size */
 #define MAX_BLOCK_SZ 3072
-
-
 
 // chunk manipulation
 uint chunk_val(uint chunk_sz) {

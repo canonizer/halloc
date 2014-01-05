@@ -4,17 +4,19 @@
 
 /** real possible number of superblocks (based on device memory and superblock
 		size) */
-__constant__ uint nsbs_g;
+static __constant__ uint nsbs_g;
 
 /** superblock size (common for all superblocks, power-of-two) */
-__constant__ uint sb_sz_g;
+static __constant__ uint sb_sz_g;
 /** superblock size shift (for fast division operations) */
-__constant__ uint sb_sz_sh_g;
+static __constant__ uint sb_sz_sh_g;
 
 /** real number of sizes */
-__constant__ uint nsizes_g;
+static __constant__ uint nsizes_g;
 
 /** slab descriptors */
-__device__ superblock_t sbs_g[MAX_NSBS];
+static __device__ superblock_t sbs_g[MAX_NSBS];
+/** slab pointers (stored separately from descriptors, as they do not change) */
+__attribute__((aligned(128))) static __device__ void *sb_ptrs_g[MAX_NSBS];
 /** slab (non-distributed) counters */
-__device__ uint sb_counters_g[MAX_NSBS];
+static __device__ uint sb_counters_g[MAX_NSBS];
