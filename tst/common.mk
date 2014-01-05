@@ -17,8 +17,8 @@ $(TGT): $(LIBS) $(OBJ) makefile
 	nvcc -arch=sm_35 -O3 -Xcompiler -fopenmp $(OBJ) $(LIBS) -o $(TGT)
 
 $(OBJ): $(SRC) makefile
-	nvcc -arch=sm_35 -O3 -Xcompiler -fopenmp -I../../include -I../../common \
-	  -dc $(SRC_C) -o $(OBJ)
+	nvcc -arch=sm_35 -O3 -Xcompiler -fopenmp \
+	-I../../include -I../../common -dc $(SRC_C) -o $(OBJ)
 
 run: $(TGT)
 	./$(TGT)

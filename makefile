@@ -8,10 +8,14 @@ TGT=bin/$(NAME)
 
 TMP=*~ \\\#* src/*~ src/\\\#* tst/corr/*~ tst/corr/*.o $(TGT) $(TEST_TGT)
 
-# be careful: using cs modifier can lead to subtle errors, though increases performance
+# be careful: using cs modifier can lead to errors maxrregcount should be 44-64,
+# this allows both enough threads and enough storage (values of 44 and 54 give
+# good results in phase test, while 60 and 64 provide somewhat better spree
+# throughput)
 build: $(TGT)
 $(TGT):	$(SRC) makefile
-	nvcc -arch=sm_35 -O3 -lib -rdc=true -Xptxas -dlcm=cg -Xptxas -dscm=cg -o $(TGT) $(SRC_C)
+	nvcc -arch=sm_35 -O3 -lib -rdc=true -Xptxas -dlcm=cg -Xptxas -dscm=cg \
+	-Xptxas -maxrregcount=44 -o $(TGT) $(SRC_C)
 #	nvcc -arch=sm_35 -O3 -lib -rdc=true -Xptxas -dlcm=cs -Xptxas -dscm=cs -o $(TGT) $(SRC_C)
 #	nvcc -arch=sm_35 -O3 -lib -rdc=true -o $(TGT) $(SRC_C)
 

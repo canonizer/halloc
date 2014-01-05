@@ -186,7 +186,7 @@ void grid_test(int n, int ncells, bool alloc, bool print) {
 
 	// fill the grid
 	double t1 = omp_get_wtime();
-	int bs = 256;
+	int bs = 128;
 	sort_points_k<<<divup(n, bs), bs>>>(d_grid, ncells, d_ps, pre_chains, n);
 	cucheck(cudaGetLastError());
 	cucheck(cudaStreamSynchronize(0));
