@@ -5,7 +5,7 @@
 
 #include "utils.h"
 
-#define SBSET_CTR 1
+#define SBSET_CTR 0
 
 /** superblock set type; word 0 is actually an additional counter */
 typedef uint sbset_t[SB_SET_SZ];

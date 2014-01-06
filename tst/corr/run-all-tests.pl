@@ -6,7 +6,7 @@ use POSIX;
 
 $ntests = 0;
 $nsuccesses = 0;
-$device = 1;
+$device = 0;
 $memory = 512 * 1024 * 1024;
 
 sub runtest {

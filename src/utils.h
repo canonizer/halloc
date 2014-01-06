@@ -59,7 +59,7 @@ typedef unsigned long long uint64;
 #define WARP_SZ 32
 /** maximum number of superblocks */
 //#define MAX_NSBS 4096
-#define MAX_NSBS 2048
+#define MAX_NSBS 8192
 /** the size of SB set, in words; the number of used SBs can be smaller */
 #define SB_SET_SZ (MAX_NSBS / WORD_SZ)
 

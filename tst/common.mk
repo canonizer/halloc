@@ -14,7 +14,8 @@ TMP=*~ \\\#* ../tmp/*.o $(TGT)
 
 build: $(TGT)
 $(TGT): $(LIBS) $(OBJ) makefile
-	nvcc -arch=sm_35 -O3 -Xcompiler -fopenmp $(OBJ) $(LIBS) -o $(TGT)
+	nvcc -arch=sm_35 -O3 -Xcompiler -fopenmp \
+	$(OBJ) $(LIBS) -o $(TGT)
 
 $(OBJ): $(SRC) makefile
 	nvcc -arch=sm_35 -O3 -Xcompiler -fopenmp \

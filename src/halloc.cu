@@ -224,7 +224,7 @@ void ha_init(halloc_opts_t opts) {
 	uint sb_sz = 1 << opts.sb_sz_sh;
 
 	// set cache configuration
-	//cucheck(cudaDeviceSetCacheConfig(cudaFuncCachePreferL1));
+	cucheck(cudaDeviceSetCacheConfig(cudaFuncCachePreferL1));
 
 	// limit memory available to 3/4 of device memory
 	opts.memory = min((uint64)opts.memory, 3ull * dev_memory / 4ull);
