@@ -1,6 +1,6 @@
 /** @file grid-points.cu a test where grid points are sorted into a grid */
 
-#define HALLOC_OVERRIDE_STDC
+#define HALLOC_CPP
 #include <halloc.h>
 
 #include <math.h>
@@ -113,8 +113,10 @@ point_list_t *pre_chains) {
 	while(plist) {
 		pnext = plist->next;
 		//plist->next = 0;
-		if(!pre_chains)
+		if(!pre_chains) {
 			hafree(plist);
+			//delete plist;
+		}
 		//free(plist);
 		plist = pnext;
 	}
@@ -132,10 +134,12 @@ __global__ void sort_points_k
 	point_list_t *plist;
 	if(pre_chains)
 		plist = pre_chains + ip;
-	else
+	else {
 		plist = (point_list_t *)hamalloc(sizeof(point_list_t));
+		//plist = new point_list_t();
+	}
 	if(!plist) {
-		printf("cannot allocate memory\n");
+		//printf("cannot allocate memory\n");
 		return;
 	}
 
@@ -218,10 +222,11 @@ int main(int argc, char **argv) {
 	srandom((int)time(0));
 	size_t memory = 256 * 1024 * 1024;
 	bool alloc = true;
+	cucheck(cudaSetDevice(2));
 	ha_init(halloc_opts_t(memory));
 	// warm-up run
 	grid_test(10000, 8, alloc, false);
 	// main run
-	grid_test(4000000, 32, alloc, true);
+	grid_test(2000000, 16, alloc, true);
 	ha_shutdown();
 }  // main

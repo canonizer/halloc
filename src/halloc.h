@@ -61,5 +61,28 @@ inline __device__ void free(void *p) throw() { hafree(p); }
 extern "C" __host__ void free(void *p) throw();
 #endif
 
+// overload new/delete C++ operators on device if requested
+// currently doesn't make much sense: the compiler treats operator new very
+// specially, and obviously links it against an external library, which kills
+// all performance
+#if !defined(HALLOCLIB_COMPILING) && defined(HALLOC_CPP)
+#include <new>
+struct halloc_tag_t;
+typedef halloc_tag_t *halloc_t;
+#define halloc ((halloc_t)0)
+__device__ inline void *operator new(size_t size) throw(std::bad_alloc) { 
+	return hamalloc(size); 
+}
+__device__ inline void *operator new[](size_t size) throw(std::bad_alloc) {
+	return hamalloc(size); 
+}
+__device__ inline void operator delete(void *p) throw() {
+	hafree(p);
+}
+__device__ inline void operator delete[](void *p) throw() {
+	hafree(p);
+}
+#endif
+
 
 #endif
