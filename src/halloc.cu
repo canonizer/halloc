@@ -36,6 +36,7 @@
 #endif
 
 /** thread frequency for initial hashing */
+//#define THREAD_FREQ 11
 #define THREAD_FREQ 11
 //#define THREAD_FREQ (2 * 5)
 /** allocation counter increment */
