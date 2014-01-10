@@ -42,6 +42,18 @@ void random_array(int *arr, size_t n, int p, int a, int b) {
 	}
 }
 
+void alloc_strs(char **strs, const int *lens, int n) {
+#pragma omp parallel for
+	for(int i = 0; i < n; i++) {
+		int l = lens[i];
+		char *str = (char *)malloc((l + 1) * sizeof(char));
+		for(int j = 0; j < l; j++)
+			str[j] = ' ';
+		str[l] = 0;
+		strs[i] = str;
+	}
+}  // alloc_strs
+
 /** a kernel that allocates and initializes an array of strings; memory for
 		strings is allocated using halloc */
 __global__ void alloc_strs_k
@@ -54,13 +66,25 @@ __global__ void alloc_strs_k
 	int l = lens[i];
 	//if(i > n - 256)
 	//	printf("i = %d, l = %d, n = %d\n", i, l, n);
-	char *str = (char *)hamalloc((l + 1) * sizeof(char));
-	// initialize
-	for(int j = 0; j < l; j++)
-		str[j] = '0' + j;
-	str[l] = 0;
+	// char *str = (char *)hamalloc((l + 1) * sizeof(char));
+	// for(int j = 0; j < l; j++)
+	//  	str[j] = '0' + j;
+	// str[l] = 0;
+
+	// int *str = (int *)hamalloc((l + 1) * sizeof(char));
+	// int l_i = (l + 1) / 4;
+	// for(int j = 0; j < l_i - 1; j++)
+	// 	str[j] = 0x20202020;
+	// str[l_i] = 0x20202000;
+
+	uint64 *str = (uint64 *)hamalloc((l + 1) * sizeof(char));
+	int l_i = (l + 1) / 8;
+	for(int j = 0; j < l_i - 1; j++)
+	  str[j] = 0x2020202020202020ull;
+	str[l_i] = 0x0020202020202020ull;
+
 	// save string pointer
-	strs[i] = str;
+	strs[i] = (char *)str;
 }  // alloc_strs_k
 
 /** a kernel that frees memory allocated for strings */
@@ -72,22 +96,80 @@ __global__ void free_strs_k
 	hafree(strs[i]);
 }  // free_strs_k
 
+void free_strs(char ** strs, int n) {
+	#pragma omp parallel for
+	for(int i = 0; i < n; i++)
+		free(strs[i]);
+}  // free_strs
+
 // couple of helper device functions, analogous to C library
-/** get the length of a string */
+/** get the length of a string; it is assumed that s is at least 8-byte aligned */
 __device__ inline int dstrlen(const char * __restrict__ s) {
 	int len = 0;
-	while(*s++) len++;
-	return len;
+	// while(*s++) len++;
+	// return len;
+	const uint64 *s1 = (const uint64 *)s;
+	while(true) {
+		uint64 c1 = *s1++;
+		for(int i = 0; i < 8; i++) {
+			if(((c1 >> i * 8) & 0xffu) == 0)
+				return len;
+			len++;
+		}
+	}
 }  // strlen
 
 /** concatenate two strings into the third string; all strings have been
-		allocated, and the result has enough place to hold the arguments */
+		allocated, and the result has enough place to hold the arguments; 
+		all pointers are assumed to be 8-byte aligned
+*/
 __device__ inline void dstrcat
 (char *  __restrict__ c, const char * __restrict__ b, 
  const char * __restrict__ a) {
-	while(*c++ = *a++) {}
-	c--;
-	while(*c++ = *b++) {}
+	// while(*c++ = *a++) {}
+	// c--;
+	// while(*c++ = *b++) {}
+	uint64 *c1 = (uint64 *)c;
+	const uint64 *a1 = (const uint64 *)a;
+	const uint64 *b1 = (const uint64 *)b;
+	uint64 cc = 0, aa = 0, bb = 0;
+	int ccpos = 0;
+	uint cc1 = 0;
+	// copy first string
+	do {
+		aa = *a1++;
+		for(int i = 0; i < 8; i++) {
+			cc1 = (uint)(aa >> i * 8) & 0xffu;
+			if(cc1) {
+				cc |= (uint64)cc1 << ccpos;
+				ccpos += 8;
+				if(ccpos == 64) {
+					*c1++ = cc;
+					ccpos = 0;
+					cc = 0;
+				}
+			} else
+				break;
+		}
+	} while(cc1);
+	// copy second string
+	do {
+		bb = *b1++;
+		for(int i = 0; i < 8; i++) {
+			cc1 = (uint)(bb >> i * 8) & 0xffu;
+			cc |= (uint64)cc1 << ccpos;
+			ccpos += 8;
+			if(ccpos == 64) {
+				*c1++ = cc;
+				ccpos = 0;
+				cc = 0;
+			}
+			if(!cc1)
+				break;
+		}
+	} while(cc1);
+	if(ccpos)
+		*c1 = cc;
 }  // dstrcat
 
 /** adds two arrays of strings elementwise */
@@ -108,11 +190,27 @@ __global__ void add_strs_k
 	//	printf("c[%d][2] = %c\n", i, (int)sc[2]);
 }  // add_strs_k
 
-/** a test for string addition */
-void string_test(int n, bool print) {
-	int min_len = 127;
-	int max_len = 127;
-	int period = 32;
+void add_strs(char ** __restrict__ c, char **a, char **b, int n) {
+#pragma omp parallel for
+	for(int i = 0; i < n; i++) {
+		const char *sa = a[i], *sb = b[i];
+		int la = strlen(sa), lb = strlen(sb), lc = la + lb;
+		char *sc = (char *)malloc((lc + 1) * sizeof(char));
+		strcpy(sc, sa);
+		strcpy(sc + la, sb);
+		c[i] = sc;
+	}
+}  // add_strs
+
+#define MIN_LEN 7
+#define MAX_LEN 63
+#define PERIOD 32
+
+/** a test for string addition on GPU */
+void string_test_gpu(int n, bool print) {
+	int min_len = MIN_LEN;
+	int max_len = MAX_LEN;
+	int period = PERIOD;
 	// string lengths on host and device
 	int *h_la = 0, *d_la = 0, *h_lb = 0, *d_lb = 0;
 	size_t l_sz = n * sizeof(int), s_sz = n * sizeof(char *);
@@ -144,11 +242,11 @@ void string_test(int n, bool print) {
 	//printf("t1 = %lf, t2 = %lf\n", t1, t2);
 	if(print) {
 		double t = (t2 - t1) / 2;
-		printf("allocation time: %4.2lf ms\n", t * 1e3);
-		printf("allocation performance: %4.2lf Mstrings/s\n", n / t * 1e-6);
+		printf("GPU allocation time: %4.2lf ms\n", t * 1e3);
+		printf("GPU allocation performance: %4.2lf Mstrings/s\n", n / t * 1e-6);
 	}
-	
-	// concatenate strings
+
+	//concatenate strings
 	t1 = omp_get_wtime();
 	add_strs_k<<<grid, bs>>>(d_sc, d_sa, d_sb, n);
 	cucheck(cudaGetLastError());
@@ -156,9 +254,10 @@ void string_test(int n, bool print) {
 	t2 = omp_get_wtime();
 	if(print) {
 		double t = t2 - t1;
-		printf("concatenation time: %4.2lf ms\n", t * 1e3);
-		printf("concatenation performance: %4.2lf Mstrings/s\n", n / t * 1e-6);
+		printf("GPU concatenation time: %4.2lf ms\n", t * 1e3);
+		printf("GPU concatenation performance: %4.2lf Mstrings/s\n", n / t * 1e-6);
 	}
+
 	// free strings
 	t1 = omp_get_wtime();
 	free_strs_k<<<grid, bs>>>(d_sa, n);
@@ -171,8 +270,9 @@ void string_test(int n, bool print) {
 	t2 = omp_get_wtime();
 	if(print) {
 		double t = (t2 - t1) / 3;
-		printf("freeing time: %4.2lf ms\n", t * 1e3);
-		printf("freeing performance: %4.2lf Mstrings/s\n", n / t * 1e-6);
+		//double t = (t2 - t1) / 2;
+		printf("GPU freeing time: %4.2lf ms\n", t * 1e3);
+		printf("GPU freeing performance: %4.2lf Mstrings/s\n", n / t * 1e-6);
 	}
 
 	// free the rest
@@ -183,17 +283,83 @@ void string_test(int n, bool print) {
 	cucheck(cudaFree(d_lb));
 	cucheck(cudaFreeHost(h_la));
 	cucheck(cudaFreeHost(h_lb));
-}  // string_test
+}  // string_test_gpu
+
+/** a test for string addition on CPU */
+void string_test_cpu(int n, bool print) {
+	int min_len = MIN_LEN;
+	int max_len = MAX_LEN;
+	int period = PERIOD;
+	// string lengths on host and device
+	int *h_la = 0, *h_lb = 0;
+	size_t l_sz = n * sizeof(int), s_sz = n * sizeof(char *);
+	h_la = (int *)malloc(l_sz);
+	h_lb = (int *)malloc(l_sz);
+	random_array(h_la, n, period, min_len, max_len);
+	random_array(h_lb, n, period, min_len, max_len);
+
+	// string arrays
+	char **h_sa, **h_sb, **h_sc;
+	h_sa = (char **)malloc(s_sz);
+	h_sb = (char **)malloc(s_sz);
+	h_sc = (char **)malloc(s_sz);
+
+	// allocate strings
+	double t1, t2;
+	t1 = omp_get_wtime();
+	alloc_strs(h_sa, h_la, n);
+	alloc_strs(h_sb, h_lb, n);
+	t2 = omp_get_wtime();
+	//printf("t1 = %lf, t2 = %lf\n", t1, t2);
+	if(print) {
+		double t = (t2 - t1) / 2;
+		printf("CPU allocation time: %4.2lf ms\n", t * 1e3);
+		printf("CPU allocation performance: %4.2lf Mstrings/s\n", n / t * 1e-6);
+	}
+
+	//concatenate strings
+	t1 = omp_get_wtime();
+	add_strs(h_sc, h_sa, h_sb, n);
+	t2 = omp_get_wtime();
+	if(print) {
+		double t = t2 - t1;
+		printf("CPU concatenation time: %4.2lf ms\n", t * 1e3);
+		printf("CPU concatenation performance: %4.2lf Mstrings/s\n", n / t * 1e-6);
+	}
+
+	// free strings
+	t1 = omp_get_wtime();
+	free_strs(h_sa, n);
+	free_strs(h_sb, n);
+	free_strs(h_sc, n);
+	t2 = omp_get_wtime();
+	if(print) {
+		double t = (t2 - t1) / 3;
+		//double t = (t2 - t1) / 2;
+		printf("CPU freeing time: %4.2lf ms\n", t * 1e3);
+		printf("CPU freeing performance: %4.2lf Mstrings/s\n", n / t * 1e-6);
+	}
+	// free the rest
+	free(h_sa);
+	free(h_sb);
+	free(h_sc);
+	free(h_la);
+	free(h_lb);
+}  // string_test_cpu
+
 
 int main(int argc, char **argv) {
 	srandom((int)time(0));
 	size_t memory = 512 * 1024 * 1024;
 	//bool alloc = true;
-	cucheck(cudaSetDevice(1));
+	cucheck(cudaSetDevice(2));
 	ha_init(halloc_opts_t(memory));
-	// warm-up run
-	string_test(10000, false);
-	// main run
-	string_test(200000, true);
+	// GPU test
+	string_test_gpu(10000, false);
+	string_test_gpu(500000, true);
+	printf("==============================\n");
+	// CPU test
+	string_test_cpu(10000, false);
+	string_test_cpu(500000, true);
 	ha_shutdown();
 }  // main
