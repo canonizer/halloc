@@ -28,7 +28,8 @@ typedef unsigned long long int uint64;
 
 /** a random value in [a, b] range */
 int random(int a, int b) {
-	return a + random() % (b + 1);
+	return a + random() % (b - a + 1);
+	//return a;
 }
 
 /** an array filled with random values in [a, b] range, with contiguous groups
@@ -64,6 +65,8 @@ __global__ void alloc_strs_k
 		return;
 	// allocate string (don't forget zero byte!)
 	int l = lens[i];
+	//if(i == 0)
+	//	printf("l = %d\n", l);
 	//if(i > n - 256)
 	//	printf("i = %d, l = %d, n = %d\n", i, l, n);
 	// char *str = (char *)hamalloc((l + 1) * sizeof(char));
@@ -71,17 +74,11 @@ __global__ void alloc_strs_k
 	//  	str[j] = '0' + j;
 	// str[l] = 0;
 
-	// int *str = (int *)hamalloc((l + 1) * sizeof(char));
-	// int l_i = (l + 1) / 4;
-	// for(int j = 0; j < l_i - 1; j++)
-	// 	str[j] = 0x20202020;
-	// str[l_i] = 0x20202000;
-
 	uint64 *str = (uint64 *)hamalloc((l + 1) * sizeof(char));
 	int l_i = (l + 1) / 8;
 	for(int j = 0; j < l_i - 1; j++)
 	  str[j] = 0x2020202020202020ull;
-	str[l_i] = 0x0020202020202020ull;
+	str[l_i - 1] = 0x0020202020202020ull;
 
 	// save string pointer
 	strs[i] = (char *)str;
@@ -106,17 +103,17 @@ void free_strs(char ** strs, int n) {
 /** get the length of a string; it is assumed that s is at least 8-byte aligned */
 __device__ inline int dstrlen(const char * __restrict__ s) {
 	int len = 0;
-	// while(*s++) len++;
-	// return len;
-	const uint64 *s1 = (const uint64 *)s;
-	while(true) {
-		uint64 c1 = *s1++;
-		for(int i = 0; i < 8; i++) {
-			if(((c1 >> i * 8) & 0xffu) == 0)
-				return len;
-			len++;
-		}
-	}
+	while(*s++) len++;
+	return len;
+	// const uint64 *s1 = (const uint64 *)s;
+	// while(true) {
+	// 	uint64 c1 = *s1++;
+	// 	for(int i = 0; i < 8; i++) {
+	// 		if(((c1 >> i * 8) & 0xffu) == 0)
+	// 			return len;
+	// 		len++;
+	// 	}
+	// }
 }  // strlen
 
 /** concatenate two strings into the third string; all strings have been
@@ -184,6 +181,8 @@ __global__ void add_strs_k
 	int la = dstrlen(sa), lb = dstrlen(sb), lc = la + lb;
 	// allocate memory and get new string
 	char *sc = (char *)hamalloc((lc + 1) * sizeof(char));
+	//if(i < 16)
+	//	printf("la = %d, lb = %d, lc = %d\n", la, lb, lc);
 	dstrcat(sc, sa, sb);
 	c[i] = sc;
 	//if(i > n - 256)
@@ -202,8 +201,8 @@ void add_strs(char ** __restrict__ c, char **a, char **b, int n) {
 	}
 }  // add_strs
 
-#define MIN_LEN 7
-#define MAX_LEN 63
+#define MIN_LEN 31
+#define MAX_LEN 31
 #define PERIOD 32
 
 /** a test for string addition on GPU */
