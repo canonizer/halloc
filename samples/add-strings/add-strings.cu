@@ -229,7 +229,7 @@ void string_test_gpu(int n, bool print) {
 	cucheck(cudaMalloc((void **)&d_sc, s_sz));
 
 	// allocate strings
-	int bs = 128, grid = divup(n, bs);
+ 	int bs = 768,	grid = divup(n, bs);
 	double t1, t2;
 	t1 = omp_get_wtime();
 	alloc_strs_k<<<grid, bs>>>(d_sa, d_la, n);

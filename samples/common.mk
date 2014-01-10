@@ -14,7 +14,7 @@ $(TGT): $(LIBHALLOC) $(OBJ) makefile
 	nvcc -arch=sm_35 -O3 -Xcompiler -fopenmp $(OBJ) $(LIBHALLOC) -o $(TGT)
 
 $(OBJ): $(SRC) makefile
-	nvcc -arch=sm_35 -O3 -Xcompiler -fopenmp -Xptxas -dlcm=cg -Xptxas -dscm=cg \
+	nvcc -arch=sm_35 -O3 -Xcompiler -fopenmp -Xptxas -dlcm=cg -Xptxas -dscm=wb \
 		-I../include -dc $(SRC_C) -o $(OBJ)
 
 run: $(TGT)
