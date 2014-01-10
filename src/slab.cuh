@@ -60,8 +60,9 @@ __device__ inline uint *sb_alloc_sizes(uint sb) {
 __device__ inline void sb_set_alloc_size
 (uint *alloc_words, uint ichunk, uint	nchunks) {
 	
-	uint iword = ichunk / 4, ibyte = ichunk % 4, shift = ibyte * 8;
-	//uint iword = ichunk / 16, ibyte = ichunk % 16, shift = ibyte * 2;
+	//uint iword = ichunk / 4, ibyte = ichunk % 4, shift = ibyte * 8;
+	uint iword = ichunk / 8, ibyte = ichunk % 8, shift = ibyte * 4;
+	//uint iword = ichunk / 10, ibyte = ichunk % 10, shift = ibyte * 3;
 	uint mask = nchunks << shift;
 	//if(atomicOr(&alloc_words[iword], mask) & mask)
 	//	dummy_g = 1;
@@ -72,7 +73,9 @@ __device__ inline void sb_set_alloc_size
 		@returns the number of chunks allocated for this allocation (max 15)
  */
 __device__ inline uint sb_get_reset_alloc_size(uint *alloc_words, uint ichunk) {
-	uint iword = ichunk / 4, ibyte = ichunk % 4, shift = ibyte * 8, cmask = 0xfu;
+	//uint iword = ichunk / 4, ibyte = ichunk % 4, shift = ibyte * 8, cmask =	0xffu;
+	uint iword = ichunk / 8, ibyte = ichunk % 8, shift = ibyte * 4, cmask = 0xfu;
+	//uint iword = ichunk / 10, ibyte = ichunk % 10, shift = ibyte * 3, cmask = 0x7u;
 	//uint iword = ichunk / 16, ibyte = ichunk % 16, shift = ibyte * 2, cmask = 0x3u;
 	uint mask = ~(cmask << shift);
 	return (atomicAnd(&alloc_words[iword], mask) >> shift) & cmask;
@@ -481,6 +484,7 @@ __device__ __forceinline__ void *sb_alloc_in
 									 ldca(&size_info->nchunks_in_block)) % 
 				ldca(&size_info->hash_step);
 			ichunk = (ichunk0 + (itry + 1) * step) % ldca(&size_info->nchunks);
+			//ichunk = (ichunk0 + step) % ldca(&size_info->nchunks);
 		}
 	} while(++itry % MAX_NTRIES < MAX_NTRIES - 1);
 		//}

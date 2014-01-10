@@ -189,7 +189,7 @@ int main(int argc, char **argv) {
 	srandom((int)time(0));
 	size_t memory = 512 * 1024 * 1024;
 	//bool alloc = true;
-	cucheck(cudaSetDevice(0));
+	cucheck(cudaSetDevice(1));
 	ha_init(halloc_opts_t(memory));
 	// warm-up run
 	string_test(10000, false);
