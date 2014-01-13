@@ -48,12 +48,14 @@ void alloc_strs(char **strs, const int *lens, int n) {
 	for(int i = 0; i < n; i++) {
 		int l = lens[i];
 		char *str = (char *)malloc((l + 1) * sizeof(char));
+		//strs[i] = (char *)malloc((l + 1) * sizeof(char));
+		/*
 		for(int j = 0; j < l; j++)
 			str[j] = ' ';
-		str[l] = 0;
+			str[l] = 0; */
 		strs[i] = str;
 	}
-}  // alloc_strs
+}  //alloc_strs
 
 /** a kernel that allocates and initializes an array of strings; memory for
 		strings is allocated using halloc */
@@ -102,18 +104,26 @@ void free_strs(char ** strs, int n) {
 // couple of helper device functions, analogous to C library
 /** get the length of a string; it is assumed that s is at least 8-byte aligned */
 __device__ inline int dstrlen(const char * __restrict__ s) {
-	int len = 0;
-	while(*s++) len++;
+	//int len = -1;
+	int len = INT_MAX;
+	//while(*s++) len++;
+	//return len;
+	const uint64 *s1 = (const uint64 *)s;
+	int ll = 0;
+	while(len == INT_MAX) {
+	//while(true) {
+		uint64 c1 = *s1++;
+		#pragma unroll 8
+		for(int i = 0; i < 8; i++) {
+			//if(((c1 >> i * 8) & 0xffu) == 0)
+			//	return len;
+			//len++;
+			if(((c1 >> i * 8) & 0xffu) == 0)
+				len = min(len, ll + i);
+		}
+		ll++;
+	}
 	return len;
-	// const uint64 *s1 = (const uint64 *)s;
-	// while(true) {
-	// 	uint64 c1 = *s1++;
-	// 	for(int i = 0; i < 8; i++) {
-	// 		if(((c1 >> i * 8) & 0xffu) == 0)
-	// 			return len;
-	// 		len++;
-	// 	}
-	// }
 }  // strlen
 
 /** concatenate two strings into the third string; all strings have been
@@ -132,11 +142,13 @@ __device__ inline void dstrcat
 	uint64 cc = 0, aa = 0, bb = 0;
 	int ccpos = 0;
 	uint cc1 = 0;
+	// TODO: optimize computations for concatenation
 	// copy first string
 	do {
 		aa = *a1++;
 		for(int i = 0; i < 8; i++) {
 			cc1 = (uint)(aa >> i * 8) & 0xffu;
+			//ccpos += 8;
 			if(cc1) {
 				cc |= (uint64)cc1 << ccpos;
 				ccpos += 8;
@@ -179,14 +191,11 @@ __global__ void add_strs_k
 	// measure strings a and b
 	const char *sa = a[i], *sb = b[i];
 	int la = dstrlen(sa), lb = dstrlen(sb), lc = la + lb;
+	//int la = 31, lb = 31, lc = la + lb;
 	// allocate memory and get new string
 	char *sc = (char *)hamalloc((lc + 1) * sizeof(char));
-	//if(i < 16)
-	//	printf("la = %d, lb = %d, lc = %d\n", la, lb, lc);
 	dstrcat(sc, sa, sb);
 	c[i] = sc;
-	//if(i > n - 256)
-	//	printf("c[%d][2] = %c\n", i, (int)sc[2]);
 }  // add_strs_k
 
 void add_strs(char ** __restrict__ c, char **a, char **b, int n) {
@@ -194,6 +203,7 @@ void add_strs(char ** __restrict__ c, char **a, char **b, int n) {
 	for(int i = 0; i < n; i++) {
 		const char *sa = a[i], *sb = b[i];
 		int la = strlen(sa), lb = strlen(sb), lc = la + lb;
+		//int la = 31, lb = 31, lc = la + lb;
 		char *sc = (char *)malloc((lc + 1) * sizeof(char));
 		strcpy(sc, sa);
 		strcpy(sc + la, sb);
@@ -229,7 +239,7 @@ void string_test_gpu(int n, bool print) {
 	cucheck(cudaMalloc((void **)&d_sc, s_sz));
 
 	// allocate strings
- 	int bs = 768,	grid = divup(n, bs);
+ 	int bs = 128,	grid = divup(n, bs);
 	double t1, t2;
 	t1 = omp_get_wtime();
 	alloc_strs_k<<<grid, bs>>>(d_sa, d_la, n);
@@ -337,7 +347,8 @@ void string_test_cpu(int n, bool print) {
 		//double t = (t2 - t1) / 2;
 		printf("CPU freeing time: %4.2lf ms\n", t * 1e3);
 		printf("CPU freeing performance: %4.2lf Mstrings/s\n", n / t * 1e-6);
-	}
+	} 
+
 	// free the rest
 	free(h_sa);
 	free(h_sb);
@@ -350,15 +361,15 @@ void string_test_cpu(int n, bool print) {
 int main(int argc, char **argv) {
 	srandom((int)time(0));
 	size_t memory = 512 * 1024 * 1024;
-	//bool alloc = true;
-	cucheck(cudaSetDevice(2));
-	ha_init(halloc_opts_t(memory));
 	// GPU test
+	cucheck(cudaSetDevice(3));
+	ha_init(halloc_opts_t(memory));
+	//cucheck(cudaDeviceSetCacheConfig(cudaFuncCachePreferL1));
 	string_test_gpu(10000, false);
-	string_test_gpu(500000, true);
+	string_test_gpu(1000000, true);
 	printf("==============================\n");
 	// CPU test
 	string_test_cpu(10000, false);
-	string_test_cpu(500000, true);
+	string_test_cpu(1000000, true);
 	ha_shutdown();
 }  // main

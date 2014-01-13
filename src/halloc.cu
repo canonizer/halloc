@@ -35,10 +35,12 @@
 #define COUNTER_FREQ (32 * 1024)
 #endif
 
-/** thread frequency for initial hashing */
+/** thread frequency for initial hashing; 11 is default, 7 is moderately good */
 //#define THREAD_FREQ 11
 #define THREAD_FREQ 11
-//#define THREAD_FREQ (2 * 5)
+/** thread modulus for initial hashing, indicates how many threads will be
+		grouped together */
+#define THREAD_MOD 4
 /** allocation counter increment */
 #define COUNTER_INC 1
 
@@ -109,10 +111,14 @@ __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
 	uint ichunk = tid * THREAD_FREQ + cv * cv * (cv + 1);
 #else
 	uint ichunk = cv;
-	ichunk = ichunk * THREAD_FREQ;
+	//ichunk = ichunk * THREAD_FREQ;
+	ichunk = ichunk / THREAD_MOD * THREAD_MOD * THREAD_FREQ + ichunk % THREAD_MOD;
+	//ichunk = ichunk / 4 * THREAD_FREQ + ichunk % 4;
 #endif
-	ichunk = ichunk * ldca(&size_info->nchunks_in_block) % ldca(&size_info->nchunks);
-  //ichunk = ichunk * size_info->nchunks_in_block & (size_info->nchunks - 1);
+	ichunk = ichunk * ldca(&size_info->nchunks_in_block) %
+		ldca(&size_info->nchunks);
+	//ichunk = ichunk * ldca(&size_info->nchunks_in_block) &
+	//	(ldca(&size_info->nchunks) - 1);
 	// main allocation loop
 	bool want_alloc = true, need_roomy_sb = false;
 	//uint res_mask = 0xc;

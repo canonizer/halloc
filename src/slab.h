@@ -45,6 +45,7 @@ typedef struct {
 #define CACHE_HEAD_SBS 1
 /** step frequency, i.e. what's the step for step update */
 #define STEP_FREQ 64
+//#define STEP_FREQ 64
 
 /** positions and sizes related to slab counters */
 // modified values enable better reading of counters in hex
