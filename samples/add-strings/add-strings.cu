@@ -26,6 +26,16 @@ int divup(int a, int b) { return a / b + (a % b ? 1 : 0); }
 
 typedef unsigned long long int uint64;
 
+/** prefetches into L1 cache */
+__device__ inline void prefetch_l1(const void *p) {
+	asm("prefetch.global.L1 [%0];": :"l"(p));
+}
+
+/** prefetches into L2 cache */
+__device__ inline void prefetch_l2(const void *p) {
+	asm("prefetch.global.L2 [%0];": :"l"(p));
+}
+
 /** a random value in [a, b] range */
 int random(int a, int b) {
 	return a + random() % (b - a + 1);
@@ -78,8 +88,9 @@ __global__ void alloc_strs_k
 
 	uint64 *str = (uint64 *)hamalloc((l + 1) * sizeof(char));
 	int l_i = (l + 1) / 8;
-	for(int j = 0; j < l_i - 1; j++)
+	for(int j = 0; j < l_i - 1; j++) {
 	  str[j] = 0x2020202020202020ull;
+	}
 	str[l_i - 1] = 0x0020202020202020ull;
 
 	// save string pointer
@@ -100,6 +111,17 @@ void free_strs(char ** strs, int n) {
 	for(int i = 0; i < n; i++)
 		free(strs[i]);
 }  // free_strs
+
+/** finds the zero byte in a long value, returns INT_MAX if not found */
+__device__ inline int izero_byte(uint64 v) {
+	int l = INT_MAX;
+	#pragma unroll 8
+	for(int i = 0; i < 8; i++) {
+		if(((v >> i * 8) & 0xffu) == 0)
+			l = min(l, i);
+	}
+	return l;
+}  // zero_byte
 
 // couple of helper device functions, analogous to C library
 /** get the length of a string; it is assumed that s is at least 8-byte aligned */
@@ -141,11 +163,22 @@ __device__ inline void dstrcat
 	const uint64 *b1 = (const uint64 *)b;
 	uint64 cc = 0, aa = 0, bb = 0;
 	int ccpos = 0;
-	uint cc1 = 0;
-	// TODO: optimize computations for concatenation
+	//uint cc1 = 0;
+	// TODO: optimize computations for concatenation, similar to dstrlen()
 	// copy first string
+	int izb = INT_MAX;
 	do {
 		aa = *a1++;
+		cc |= aa << ccpos;
+		izb = izero_byte(aa);
+		if(izb == INT_MAX) {
+			*c1++ = cc;
+		} else {
+			ccpos = izb * 8;
+			break;
+		} 
+	} while(izb == INT_MAX);
+	/*
 		for(int i = 0; i < 8; i++) {
 			cc1 = (uint)(aa >> i * 8) & 0xffu;
 			//ccpos += 8;
@@ -155,15 +188,30 @@ __device__ inline void dstrcat
 				if(ccpos == 64) {
 					*c1++ = cc;
 					ccpos = 0;
+					//cc = aa >> i * 8;
 					cc = 0;
 				}
 			} else
 				break;
 		}
 	} while(cc1);
+	*/
 	// copy second string
 	do {
 		bb = *b1++;
+		// commit current character group
+		cc |= bb << ccpos;
+		*c1++ = cc;
+		// update for next
+		izb = izero_byte(bb);
+		cc = bb >> ccpos;
+		if(izb != INT_MAX) {
+			*c1++ = cc;
+			break;
+		}
+	} while(izb == INT_MAX);
+
+	/*
 		for(int i = 0; i < 8; i++) {
 			cc1 = (uint)(bb >> i * 8) & 0xffu;
 			cc |= (uint64)cc1 << ccpos;
@@ -171,6 +219,7 @@ __device__ inline void dstrcat
 			if(ccpos == 64) {
 				*c1++ = cc;
 				ccpos = 0;
+				//cc = bb >> i * 8;
 				cc = 0;
 			}
 			if(!cc1)
@@ -179,6 +228,7 @@ __device__ inline void dstrcat
 	} while(cc1);
 	if(ccpos)
 		*c1 = cc;
+		*/
 }  // dstrcat
 
 /** adds two arrays of strings elementwise */

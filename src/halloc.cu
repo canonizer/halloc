@@ -101,8 +101,9 @@ __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
 	//uint ihead = (blockIdx.x / 32) % NHEADS;
 	uint ihead = 0;
 	uint size_id = size_id_from_nbytes(nbytes);
-	uint head_sb = *(volatile uint *)&head_sbs_g[ihead][size_id];
 	size_info_t *size_info = &size_infos_g[size_id];
+	//prefetch_l1(size_info);
+	uint head_sb = *(volatile uint *)&head_sbs_g[ihead][size_id];
 
 	uint cv = size_ctr_inc(size_id);
 	void *p = 0;

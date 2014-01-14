@@ -134,6 +134,16 @@ __device__ inline void *ldca(void * const *p) {
 	return res;
 }  
 
+/** prefetches into L1 cache */
+__device__ inline void prefetch_l1(const void *p) {
+	asm("prefetch.global.L1 [%0];": :"l"(p));
+}
+
+/** prefetches into L2 cache */
+__device__ inline void prefetch_l2(const void *p) {
+	asm("prefetch.global.L2 [%0];": :"l"(p));
+}
+
 __device__ inline uint lanemask_lt() {
 	uint mask;
 	asm("mov.u32 %0, %%lanemask_lt;" : "=r" (mask));

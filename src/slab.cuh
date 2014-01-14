@@ -513,6 +513,8 @@ __device__ __forceinline__ void *sb_alloc_in
 			void *sbptr = ldca(&sb_ptrs_g[isb]);
 			//void *sbptr = sbs_g[isb].ptr;
 			p = (char *)sbptr + chunk_mul(ichunk, ldca(&size_info->chunk_sz));
+			// prefetch the data
+			//prefetch_l2(p);
 			// write allocation size
 			// TODO: support chunks of other size
 			uint *alloc_sizes = sb_alloc_sizes(isb);
