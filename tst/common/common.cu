@@ -21,13 +21,50 @@
 using namespace thrust;
 
 // parsing options
-const char *opts_usage_g = 
-	"usage: <test-name> <options>\n"
-	"\n"
-	"supported options are to be added later\n";
+void print_option(const char *option, const char *message) {
+	printf("  %-14s %s\n", option, message);
+}
+
+void print_suboption(const char *suboption, const char *message) {
+	printf("      %-10s %s\n", suboption, message);
+}
 
 void print_usage_and_exit(int exit_code) {
-	printf("%s", opts_usage_g);
+	//printf("%s", opts_usage_g);
+	printf("usage: <test-name> [<optitons>]\noptions:\n");
+	print_option("-h", "print this message and exit");
+	print_option("-a <allocator>", "select the allocator:");
+	print_suboption("cuda", "CUDA allocator");
+	print_suboption("halloc", "Halloc allocator (default)");
+	print_suboption("scatter", "ScatterAlloc allocator");
+	print_option("-m <nbytes>", "heap size, default 512MiB");
+	print_option("-C <fraction>", "heap fraction reserved for halloc, " 
+							 "default 0.75");
+	print_option("-B <fraction>", "busy block occupancy, default 0.835");
+	print_option("-R <fraction>", "roomy block occupancy, default 0.6");
+	print_option("-b <power>", "log2 of slab size, default 22 (=4MiB)");
+	print_option("-D <device>", "GPU to run on, default 0");
+	print_option("-n <nthreads>", "kernel grid size in threads, default 1M");
+	print_option("-t <ntries>", "number of test tries, default 8");
+	print_option("-T <nthreads>", "thread block size, default 128");
+	print_option("-s <nbytes>", "minimum allocation size, default 16");
+	print_option("-S <nbytes>", "maximum allocation size, default 16");
+	printf("if only one of -s and -S is set to some value, the other " 
+				 "one is also set to that value\n");
+	// TODO: remarks when only -s or -S is set
+	print_option("-l <nallocs>", "number of successive mallocs, default 4");
+	print_option("-i <niters>", "number of iterations inside kernel, default 1");
+	print_option("-q <power>", "log2 of allocation thread period, default 0");
+	print_option("-g <power>", "log2 of RNG thread period, default 0");
+	print_option("-d <distr>", "allocation size distribution:");
+	print_suboption("uniform", "uniform size distribution (default)");
+	print_suboption("expuniform", "f*2^e, f in [0,1], f and e uniform");
+	print_suboption("expequal", "f*2^e, f uniform in [0,1], e geometric");
+	print_option("-f <fraction>", "end of state 0 allocated fraction, default 1");
+	print_option("-F <fraction>", "end of state 1 allocated fraction, default 0");
+	print_option("-e <fraction>", "fraction of threads doing someting, " 
+							 "default 1");
+	//printf("other options to be added later\n");
 	exit(exit_code);
 }  // print_usage_and_exit
 
