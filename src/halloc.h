@@ -32,7 +32,8 @@ struct halloc_opts_t {
 };  // halloc_opts_t
 
 /** memory allocation */
-HALLOC_EXTERN __device__ __noinline__ void *hamalloc(uint nbytes);
+//HALLOC_EXTERN __device__ __noinline__ void *hamalloc(uint nbytes);
+HALLOC_EXTERN __device__ __noinline__ void *hamalloc(size_t nbytes);
 
 /** freeing the memory */
 HALLOC_EXTERN __device__ __noinline__ void hafree(void *p);

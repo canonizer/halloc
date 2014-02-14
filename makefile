@@ -1,4 +1,6 @@
+PREFIX=~/usr
 NAME=libhalloc.a
+HEADER=src/halloc.h
 SRC_C=src/*.cu
 SRC_H=src/*.h src/*.cuh
 SRC=$(SRC_C) $(SRC_H)
@@ -42,3 +44,10 @@ build-test:	$(TGT)
 	make -C tst/common build
 	make -C tst/corr build
 	make -C tst/perf build
+
+install: $(HEADER) $(TGT)
+	cp $(HEADER) $(PREFIX)/include/halloc.h
+	cp $(TGT) $(PREFIX)/lib/libhalloc.a
+
+uninstall:
+	rm -f $(PREFIX)/include/halloc.h $(PREFIX)/lib/libhalloc.a

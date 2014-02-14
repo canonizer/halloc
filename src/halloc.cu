@@ -166,11 +166,12 @@ __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
 }  // hamalloc_small
 
 /** procedure for large allocation */
-__device__ __forceinline__ void *hamalloc_large(uint nbytes) {
+__device__ __forceinline__ void *hamalloc_large(size_t nbytes) {
 	return malloc(nbytes);
 }  // hamalloc_large
 
-__device__ void *hamalloc(uint nbytes) {
+//__device__ void *hamalloc(uint nbytes) {
+__device__ void *hamalloc(size_t nbytes) {
 	if(nbytes <= MAX_BLOCK_SZ)
 		return hamalloc_small(nbytes);
 	else
