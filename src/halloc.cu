@@ -170,13 +170,26 @@ __device__ __forceinline__ void *hamalloc_large(size_t nbytes) {
 	return malloc(nbytes);
 }  // hamalloc_large
 
-//__device__ void *hamalloc(uint nbytes) {
-__device__ void *hamalloc(size_t nbytes) {
+/** a helper function to define various interfaces to halloc */
+__device__ __forceinline__ void *hamalloc_inline(size_t nbytes) {
 	if(nbytes <= MAX_BLOCK_SZ)
 		return hamalloc_small(nbytes);
 	else
 		return hamalloc_large(nbytes);
 } // hamalloc
+
+__device__ __noinline__ void *hamalloc(size_t nbytes) {
+	return hamalloc_inline(nbytes);
+}
+
+#ifdef HALLOC_CPP
+__device__ void *operator new(size_t nbytes) throw(std::bad_alloc) {
+	return hamalloc_inline(nbytes);
+}
+//__device__ void *operator new[](size_t nbytes) throw(std::bad_alloc) {
+//	return hamalloc_inline(nbytes);
+//	}
+#endif
 
 /** procedure for small free*/
 __device__ __forceinline__ void hafree_small(void *p, uint sb_id) {
@@ -205,7 +218,8 @@ __device__ __forceinline__ void hafree_large(void *p) {
 	return free(p);
 }  // hafree_large
 
-__device__ void hafree(void *p) {
+/** a helper function to define various interfaces to halloc */
+__device__ void hafree_inline(void *p) {
 	// ignore zero pointer
 	if(!p)
 		return;
@@ -219,7 +233,20 @@ __device__ void hafree(void *p) {
 	else {
 		hafree_large(p);
 	}
-}  // hafree
+}  // hafree_inline
+
+__device__ void hafree(void *p) {
+	hafree_inline(p);
+}
+
+#ifdef HALLOC_CPP
+__device__ void operator delete(void *p) throw() {
+	hafree_inline(p);
+}
+// __device__ inline void operator delete[](void *p) throw() {
+//	hafree_inline(p);
+//}
+#endif
 
 void ha_init(halloc_opts_t opts) {
 	// TODO: initialize all devices

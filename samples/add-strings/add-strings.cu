@@ -1,6 +1,5 @@
 /** @file grid-points.cu a test where grid points are sorted into a grid */
 
-#define HALLOC_CPP
 #include <halloc.h>
 
 #include <math.h>
