@@ -345,19 +345,24 @@ __device__ __forceinline__ uint find_sb_for_size(uint size_id, uint chunk_id) {
 	// try getting from busy slabs; this is really the last resort
 	if(new_head == SB_NONE) {
 		while((new_head = sbset_get_from(busy_sbs_g[size_id])) != SB_NONE) {
-			// try set head
-			lock(&sb_locks_g[new_head]);
-			bool found = false;
-			if(!sbs_g[new_head].is_head && sbs_g[new_head].size_id == size_id) {
-				found = true;
-				*(volatile bool *)&sbs_g[new_head].is_head = true;
-				// ensure that the counter is updated
-				if(!sb_set_head(&sb_counters_g[new_head]))
-					dummy_g = 1;
+			if(sb_count(sb_counters_g[new_head]) <= 
+				 (ldca(&size_infos_g[size_id].busy_threshold)  + 
+					ldca(&size_infos_g[size_id].nchunks)) / 2) {
+				// try set head
+				lock(&sb_locks_g[new_head]);
+				bool found = false;
+				if(!sbs_g[new_head].is_head && sbs_g[new_head].size_id == size_id) {
+					found = true;
+					*(volatile bool *)&sbs_g[new_head].is_head = true;
+					// ensure that the counter is updated
+					if(!sb_set_head(&sb_counters_g[new_head]))
+						dummy_g = 1;
+				}
+				unlock(&sb_locks_g[new_head]);
+				if(found)
+					break;
 			}
-			unlock(&sb_locks_g[new_head]);
-			if(found)
-				break;
+			// TODO: return slab to busy otherwise; 
 		}  // while(searching through new heads)
 	} 
 	return new_head;

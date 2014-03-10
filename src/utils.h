@@ -151,6 +151,6 @@ __device__ inline uint lanemask_lt() {
 }
 
 /** find the largest prime number below this one, and not dividing this one */
-uint max_prime_below(uint n);
+uint max_prime_below(uint n, uint nb);
 
 #endif

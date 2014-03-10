@@ -411,7 +411,6 @@ int main(int argc, char **argv) {
 	srandom((int)time(0));
 	size_t memory = 512 * 1024 * 1024;
 	// GPU test
-	cucheck(cudaSetDevice(3));
 	ha_init(halloc_opts_t(memory));
 	//cucheck(cudaDeviceSetCacheConfig(cudaFuncCachePreferL1));
 	string_test_gpu(10000, false);

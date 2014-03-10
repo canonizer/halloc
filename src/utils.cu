@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-uint max_prime_below(uint n) {
+uint max_prime_below(uint n, uint nb) {
 	for(uint p = n - 1; p >= 3; p--) {
 		uint max_d = (uint)floor(sqrt(p));
 		bool is_prime = true;
@@ -14,7 +14,7 @@ uint max_prime_below(uint n) {
 				is_prime = false;
 				break;
 			}
-		if(is_prime && n % p)
+		if(is_prime && n % p && nb % p)
 			return p;
 	}
 	// if we are here, we can't find prime; exit with failure

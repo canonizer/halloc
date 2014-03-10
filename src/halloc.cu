@@ -40,7 +40,9 @@
 #define THREAD_FREQ 11
 /** thread modulus for initial hashing, indicates how many threads will be
 		grouped together */
-#define THREAD_MOD 4
+//#define THREAD_MOD 8
+#define THREAD_MOD_SH 2
+#define THREAD_MOD (2 << THREAD_MOD_SH)
 /** allocation counter increment */
 #define COUNTER_INC 1
 
@@ -95,6 +97,30 @@ __device__ __forceinline__ uint size_ctr_inc(uint size_id) {
 	return cv;
 }  // sb_ctr_inc
 
+/** thread modifier by size id; returns the tmod value */
+__host__ __device__ inline uint tmod_by_size(uint size_id) {
+	uint tmod = 1 << max(THREAD_MOD_SH - (int)size_id / 2, 0);
+	return tmod;
+}  // tmod_by_size
+
+/** initial chunk number for small allocations */
+__device__ inline uint ichunk_init
+(uint cv, uint size_id, const size_info_t *size_info) {
+	// initial position
+#if MOSTLY_TID_HASH
+	uint ichunk = tid * THREAD_FREQ + cv * cv * (cv + 1);
+#else
+	uint ichunk = cv;
+	//ichunk = ichunk * THREAD_FREQ;
+	uint tmod = tmod_by_size(size_id), tmod_mask = tmod - 1;
+	ichunk = (ichunk & ~tmod_mask) * THREAD_FREQ + (ichunk & tmod_mask);
+	//ichunk = ichunk / THREAD_MOD * THREAD_MOD * THREAD_FREQ + ichunk % THREAD_MOD;
+#endif
+	ichunk = ichunk * ldca(&size_info->nchunks_in_block) %
+		ldca(&size_info->nchunks);	
+	return ichunk;
+}  // ichunk_init
+
 /** procedure for small allocation */
 __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
 	// the head; having multiple heads actually doesn't help
@@ -102,22 +128,12 @@ __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
 	uint ihead = 0;
 	uint size_id = size_id_from_nbytes(nbytes);
 	size_info_t *size_info = &size_infos_g[size_id];
-	//prefetch_l1(size_info);
 	uint head_sb = *(volatile uint *)&head_sbs_g[ihead][size_id];
 
 	uint cv = size_ctr_inc(size_id);
 	void *p = 0;
-	// initial position
-#if MOSTLY_TID_HASH
-	uint ichunk = tid * THREAD_FREQ + cv * cv * (cv + 1);
-#else
-	uint ichunk = cv;
-	//ichunk = ichunk * THREAD_FREQ;
-	ichunk = ichunk / THREAD_MOD * THREAD_MOD * THREAD_FREQ + ichunk % THREAD_MOD;
-	//ichunk = ichunk / 4 * THREAD_FREQ + ichunk % 4;
-#endif
-	ichunk = ichunk * ldca(&size_info->nchunks_in_block) %
-		ldca(&size_info->nchunks);
+
+	uint ichunk = ichunk_init(cv, size_id, size_info);
 	//ichunk = ichunk * ldca(&size_info->nchunks_in_block) &
 	//	(ldca(&size_info->nchunks) - 1);
 	// main allocation loop
@@ -354,6 +370,10 @@ void ha_init(halloc_opts_t opts) {
 		//size_info->block_sz = isize % 2 ? 3 * unit : 2 * unit;
 		uint block_sz = isize % 2 ? 3 * unit : 2 * unit;
 		uint nblocks = sb_sz / block_sz;
+		// round #blocks to a multiple of THREAD_MOD
+		uint tmod = tmod_by_size(isize);
+		nblocks = nblocks / tmod * tmod;
+		//nblocks = nblocks / THREAD_MOD * THREAD_MOD;
 		size_info->chunk_id = isize % 2 + (isize < nsizes / 2 ? 0 : 2);
 		uint chunk_sz = (size_info->chunk_id % 2 ? 3 : 2) * 
 			(size_info->chunk_id / 2 ? 128 : 8);
@@ -362,7 +382,7 @@ void ha_init(halloc_opts_t opts) {
 		size_info->nchunks = nblocks * size_info->nchunks_in_block;
 		// TODO: use a better hash step
 		size_info->hash_step = size_info->nchunks_in_block *
-		 	max_prime_below(nblocks / 256 + nblocks / 64);
+		 	max_prime_below(nblocks / 256 + nblocks / 64, nblocks);
 		//size_info->hash_step = size_info->nchunks_in_block * 17;
 		// printf("block = %d, step = %d, nchunks = %d, nchunks/block = %d\n", 
 		// 			 block_sz, size_info->hash_step, size_info->nchunks, 

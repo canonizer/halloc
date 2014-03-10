@@ -17,7 +17,8 @@ TMP=*~ \\\#* src/*~ src/\\\#* tst/corr/*~ tst/corr/*.o $(TGT) $(TEST_TGT)
 build: $(TGT)
 $(TGT):	$(SRC) makefile
 	nvcc -arch=sm_35 -O3 -lib -rdc=true -Xptxas -dlcm=cg -Xptxas -dscm=wb \
-	-Xptxas -maxrregcount=42 -o $(TGT) $(SRC_C)
+	-Xptxas -maxrregcount=64 -o $(TGT) $(SRC_C)
+#	-Xptxas -maxrregcount=42 -o $(TGT) $(SRC_C)
 #	nvcc -arch=sm_35 -O3 -lib -rdc=true -Xptxas -dlcm=cs -Xptxas -dscm=cs -o $(TGT) $(SRC_C)
 #	nvcc -arch=sm_35 -O3 -lib -rdc=true -o $(TGT) $(SRC_C)
 
