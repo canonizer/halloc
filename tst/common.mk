@@ -1,11 +1,23 @@
+include ../../common-def.mk
+
 LIBHALLOC=../../../bin/libhalloc.a
 LIBCOMMON=../../common/libcommontest.a
 LIBSCATTER=../../include/libscatteralloc.a
-LIBS=$(LIBHALLOC) $(LIBCOMMON) $(LIBSCATTER)
+
+LIBS :=$(LIBHALLOC) $(LIBCOMMON)
+FLAGS := -arch=sm_35 -O3 -Xcompiler -fopenmp 
+CUFLAGS := $(FLAGS) -I../../include -I../../common 
+
+ifeq ($(WITH_SCATTER), 1)
+LIBS += $(LIBSCATTER)
+CUFLAGS += -DWITH_SCATTER
+endif
+
+CUFLAGS += -dc
+
 SRC_C=*.cu
 SRC_H=../../include/halloc.h ../../common/*.h
 SRC=$(SRC_C) $(SRC_H)
-#SRC=$(SRC_C)
 TGT=../bin/$(NAME)
 
 OBJ=../tmp/$(NAME).o
@@ -14,12 +26,10 @@ TMP=*~ \\\#* ../tmp/*.o $(TGT)
 
 build: $(TGT)
 $(TGT): $(LIBS) $(OBJ) makefile
-	nvcc -arch=sm_35 -O3 -Xcompiler -fopenmp \
-	$(OBJ) $(LIBS) -o $(TGT)
+	nvcc $(FLAGS) $(OBJ) $(LIBS) -o $(TGT)
 
 $(OBJ): $(SRC) makefile
-	nvcc -arch=sm_35 -O3 -Xcompiler -fopenmp \
-	-I../../include -I../../common -dc $(SRC_C) -o $(OBJ)
+	nvcc $(CUFLAGS) -dc $(SRC_C) -o $(OBJ)
 
 run: $(TGT)
 	./$(TGT)

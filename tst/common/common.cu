@@ -36,7 +36,9 @@ void print_usage_and_exit(int exit_code) {
 	print_option("-a <allocator>", "select the allocator:");
 	print_suboption("cuda", "CUDA allocator");
 	print_suboption("halloc", "Halloc allocator (default)");
+#ifdef WITH_SCATTER
 	print_suboption("scatter", "ScatterAlloc allocator");
+#endif
 	print_option("-m <nbytes>", "heap size, default 512MiB");
 	print_option("-C <fraction>", "heap fraction reserved for halloc, " 
 							 "default 0.75");

@@ -2,6 +2,7 @@
 #define SCATTER_ALLOC_WRAPPER_H_
 
 /** @file scatter-alloc-wrapper.h wrapper class for ScatterAlloc allocator */
+#ifdef WITH_SCATTER
 
 #include "common.h"
 #include <scatter-alloc.h>
@@ -28,5 +29,7 @@ public:
 	}
 
 }; 
+
+#endif
 
 #endif

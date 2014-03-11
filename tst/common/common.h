@@ -344,9 +344,11 @@ void run_test(int argc, char ** argv, CommonOpts &opts, bool with_warmup = true)
 		//printf("testing halloc allocator\n");
 		run_test <class Halloc, Test> (opts, with_warmup);
 		break;
+#ifdef WITH_SCATTER
 	case AllocatorScatterAlloc:
 		run_test <class ScatterAlloc, Test> (opts, with_warmup);
 		break;
+#endif
 	default:
 		fprintf(stderr, "allocator invalid or not supported\n");
 		exit(-1);
