@@ -1,3 +1,5 @@
+Halloc GPU memory allocator, version 0.10
+
 INTRO
 
 Halloc is a high-throughput malloc/free-style dynamic memory allocator for
@@ -5,18 +7,19 @@ NVidia Kepler GPUs. It is based on using bit arrays to represent free blocks and
 using a hash function to quickly search for free blocks. This idea, combined
 with clever slab management and performance tuning, enables a really fast
 allocator. Halloc achieves more than 1.5 bln. mallocs/s (more than 1
-bln. malloc/free pairs/s) on K20X with 16-byte allocations with tens of
-thousands of GPU threads and more than 100MiB allocated. This is higher than
-other state-of-the-art GPU allocators. In addition, halloc's performance is also
-more stable. This makes halloc suitable for use in GPGPU applications requiring
-fast dynamic memory management. Halloc is mainly designed for small allocation
-sizes, and delegates allocations larger than 3KiB to CUDA allocator.
+bln. malloc/free pairs/s) on K20X and 16-byte allocations, with tens of
+thousands of GPU threads and more than 100MiB allocated. This is much higher
+than other state-of-the-art GPU allocators. In addition, halloc's performance is
+also more stable. This makes halloc suitable for use in GPGPU applications
+requiring fast dynamic memory management. Halloc is mainly designed for small
+allocation sizes, and delegates allocations larger than 3KiB to CUDA allocator.
 
 Halloc has been developed by Andrew V. Adinetz, who is employed as researcher in
-Forschungszentrum Juelich. This code is property of Forschungszentrum
-Juelich. Users can modify and/or distribute code free of charge, provided that
-this notice is retained. Users can also freely use and distribute halloc header
-files and compiled libraries in any software, free or commercial.
+Juelich Supercomputing Centre, Forschungszentrum Juelich. This code is property
+of Forschungszentrum Juelich. Users can modify and/or distribute code free of
+charge, provided that this notice is retained. Users can also freely use and
+distribute halloc header files and compiled libraries in any software, free or
+commercial.
 
 
 REQUIREMENTS
@@ -27,7 +30,7 @@ Hardware: Compute Capability 3.0 or higher, i.e. Kepler (tested on K20X and K40)
 
 COMPILING
 
-To compile halloc library, type:
+To compile halloc library, type (in project's top directory):
 
 	make
 
@@ -59,7 +62,11 @@ To uninstall:
 	make uninstall
 
 
-USING 
+USING HALLOC 
+
+See samples/ directory for samples using Halloc.
+
+Compiling Your Program
 
 The GPU application then needs to be compiled with halloc static library using
 separate device compilation and linking. Assuming that the variable $PREFIX
@@ -69,8 +76,11 @@ can be done as follows:
   nvcc -arch=sm_35 -O3 -I $(PREFIX)/include -dc myprog.cu -o myprog.o
 	nvcc -arch=sm_35 -O3 -L $(PREFIX)/lib -lhalloc -o myprog myprog.o
 
-The functions defined by halloc are in the halloc.h file, which
-needs to be included into your code to use halloc:
+
+Halloc API 
+
+The functions defined by halloc are in the halloc.h file, which needs to be
+included into your code to use halloc:
 
 #include <halloc.h>
 
@@ -129,7 +139,8 @@ persist across kernel invocations, and can be used in other kernel
 calls. Pointers allocated by hamalloc can only be freed by hafree;
 they cannot be deallocated, e.g., by host/device cudaFree/free.
 
-ha_shutdown() is intended to free resources used by halloc, but is currently a no-op.
+ha_shutdown() is intended to free resources used by halloc, but is currently a
+no-op.
 
 
 LIMITATIONS
