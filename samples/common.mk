@@ -14,14 +14,18 @@ OBJ=../tmp/$(NAME).o
 
 TMP=*~ \\\#* ../tmp/*.o $(TGT)
 
+ARCH := -gencode arch=compute_20,code=sm_20 \
+	-gencode arch=compute_30,code=sm_30 \
+	-gencode arch=compute_35,code=sm_35
+
 build: $(TGT)
 $(TGT): $(LIBHALLOC_FILE) $(OBJ) makefile
 #	nvcc -arch=sm_35 -O3 -Xcompiler -fopenmp $(OBJ) $(LIBHALLOC) -o $(TGT)
-	nvcc -arch=sm_35 -O3 -Xcompiler -fopenmp $(LIB_DIR) $(LIBHALLOC) -o \
-	  $(TGT) $(OBJ)
+	nvcc $(ARCH) -O3 -Xcompiler -fopenmp $(LIB_DIR) $(LIBHALLOC) -o \
+	 $(TGT) $(OBJ)
 
 $(OBJ): $(SRC) makefile
-	nvcc -arch=sm_35 -O3 -Xcompiler -fopenmp -Xptxas -dlcm=cg -Xptxas -dscm=wb \
+	nvcc $(ARCH) -O3 -Xcompiler -fopenmp -Xptxas -dlcm=cg -Xptxas -dscm=wb \
 		-Xcompiler -pthread $(INCLUDE_DIR) -dc $(SRC_C) -o $(OBJ)
 
 run: $(TGT)

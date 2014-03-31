@@ -80,7 +80,7 @@ __device__ __forceinline__ uint size_ctr_inc(uint size_id) {
 		mask = __ballot(want_inc);
 		leader_lid = warp_leader(mask);
 		uint leader_size_id = size_id;
-		leader_size_id = __shfl((int)leader_size_id, leader_lid);
+		leader_size_id = warp_bcast(leader_size_id, leader_lid);
 		group_mask = __ballot(size_id == leader_size_id);
 		//group_mask = __ballot(1);
 
@@ -91,7 +91,7 @@ __device__ __forceinline__ uint size_ctr_inc(uint size_id) {
 	}  // while
 	if(lid == leader_lid)
 		old_counter = atomicAdd(&counters_g[size_id], __popc(group_mask));
-	old_counter = __shfl((int)old_counter, leader_lid);
+	old_counter = warp_bcast(old_counter, leader_lid);
 	change =  __popc(group_mask & ((1 << lid) - 1));
 	uint cv = old_counter + change;
 	return cv;
@@ -155,7 +155,7 @@ __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
 				if(need_roomy_sb) {
 					uint leader_lid = warp_leader(need_roomy_mask);
 					uint leader_size_id = size_id;
-					leader_size_id = __shfl((int)leader_size_id, leader_lid);
+					leader_size_id = warp_bcast(leader_size_id, leader_lid);
 					// here try to check whether a new SB is really needed, and get the
 					// new SB
 					if(lane_id() == leader_lid) {
@@ -165,7 +165,7 @@ __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
 						head_sb = new_sb_for_size(size_id, ldca(&size_info->chunk_id), ihead);
 					}
 					if(size_id == leader_size_id) {
-						head_sb = __shfl((int)head_sb, leader_lid);
+						head_sb = warp_bcast(head_sb, leader_lid);
 						//if(new_head_sb != head_sb)
 						//	ntries = 0;
 						want_alloc = want_alloc && head_sb != SB_NONE;

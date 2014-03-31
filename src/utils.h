@@ -62,6 +62,8 @@ typedef unsigned long long uint64;
 #define MAX_NSBS 8192
 /** the size of SB set, in words; the number of used SBs can be smaller */
 #define SB_SET_SZ (MAX_NSBS / WORD_SZ)
+/** the maximum number of warps in a thread block */
+#define MAX_NWARPS 32
 
 /** division with rounding upwards, useful for kernel calls */
 inline __host__ __device__ int divup
@@ -114,6 +116,26 @@ __device__ inline uint lane_id(void) {
 	// TODO: maybe use more reliable lane id computation
 	//return threadIdx.x % WARP_SZ;
 }
+
+/** gets the id of the warp */
+__device__ inline uint warp_id(void) {
+	// TODO: use something more stable
+	return threadIdx.x / WARP_SZ;
+}
+
+/** broadcasts a value to all participating threads in a warp */
+__device__ inline uint warp_bcast(uint v, uint root_lid) {
+#if __CUDA_ARCH__ >= 300
+	// use warp intrinsics
+	return (uint) __shfl((int)v, root_lid);
+#else
+	// use shared memory
+	volatile __shared__ uint vs[MAX_NWARPS];
+	if(lane_id() == root_lid)
+		vs[warp_id()] = v;
+	return vs[warp_id()];
+#endif
+}  // warp_bcast
 
 /** loads the data with caching */
 __device__ inline uint ldca(const uint *p) {

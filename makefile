@@ -5,7 +5,9 @@ SRC_C=src/*.cu
 SRC_H=src/*.h src/*.cuh
 SRC=$(SRC_C) $(SRC_H)
 TGT=bin/$(NAME)
-
+ARCH= -gencode arch=compute_20,code=sm_20 \
+	-gencode arch=compute_30,code=sm_30 \
+	-gencode arch=compute_35,code=sm_35
 #TEST_TGT=tst/corr/bin/test
 
 TMP=*~ \\\#* src/*~ src/\\\#* tst/corr/*~ tst/corr/*.o $(TGT) $(TEST_TGT)
@@ -16,11 +18,11 @@ TMP=*~ \\\#* src/*~ src/\\\#* tst/corr/*~ tst/corr/*.o $(TGT) $(TEST_TGT)
 # throughput); 39-42 (39 tested) are good when operating in L1-preferred mode
 build: $(TGT)
 $(TGT):	$(SRC) makefile
-	nvcc -arch=sm_35 -O3 -lib -rdc=true -Xptxas -dlcm=cg -Xptxas -dscm=wb \
+	nvcc $(ARCH) -O3 -lib -rdc=true -Xptxas -dlcm=cg -Xptxas -dscm=wb \
 	-Xptxas -maxrregcount=64 -o $(TGT) $(SRC_C)
 #	-Xptxas -maxrregcount=42 -o $(TGT) $(SRC_C)
-#	nvcc -arch=sm_35 -O3 -lib -rdc=true -Xptxas -dlcm=cs -Xptxas -dscm=cs -o $(TGT) $(SRC_C)
-#	nvcc -arch=sm_35 -O3 -lib -rdc=true -o $(TGT) $(SRC_C)
+#	nvcc $(ARCH) -O3 -lib -rdc=true -Xptxas -dlcm=cs -Xptxas -dscm=cs -o $(TGT) $(SRC_C)
+#	nvcc $(ARCH) -O3 -lib -rdc=true -o $(TGT) $(SRC_C)
 
 #test: $(TGT) makefile
 #	make -C tst/corr/test run

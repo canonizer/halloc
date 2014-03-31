@@ -131,7 +131,7 @@ __device__ __forceinline__ uint sb_ctr_inc
 		mask = __ballot(1);
 		leader_lid = warp_leader(mask);
 		uint leader_sb_id = sb_id;
-		leader_sb_id = __shfl((int)leader_sb_id, leader_lid);
+		leader_sb_id = warp_bcast(leader_sb_id, leader_lid);
 		// allocation size is same for all superblocks
 		uint group_mask = __ballot(sb_id == leader_sb_id);
 		change = nchunks * __popc(group_mask);
@@ -141,7 +141,7 @@ __device__ __forceinline__ uint sb_ctr_inc
 		want_inc = want_inc && sb_id != leader_sb_id;
 		//}
 	}  // while
-	old_counter = __shfl((int)old_counter, leader_lid);
+	old_counter = warp_bcast(old_counter, leader_lid);
 	if(sb_chunk_id(old_counter) != chunk_id)
 		return_mask &= ~1;
 	uint old_count = sb_count(old_counter);
@@ -166,8 +166,8 @@ __device__ __forceinline__ void sb_ctr_dec(uint sb_id, uint nchunks) {
 		//mask = __ballot(want_inc);
 		uint leader_lid = warp_leader(mask), leader_sb_id = sb_id;
 		uint leader_nchunks = nchunks;
-		leader_sb_id = __shfl((int)leader_sb_id, leader_lid);
-		leader_nchunks = __shfl((int)leader_nchunks, leader_lid);
+		leader_sb_id = warp_bcast(leader_sb_id, leader_lid);
+		leader_nchunks = warp_bcast(leader_nchunks, leader_lid);
 		// allocation size is same for all superblocks
 		// TODO: handle the situation when different allocation sizes are 
 		// freed within the same slab, and do reduction for that

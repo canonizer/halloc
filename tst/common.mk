@@ -5,7 +5,12 @@ LIBCOMMON=../../common/libcommontest.a
 LIBSCATTER=../../include/libscatteralloc.a
 
 LIBS :=$(LIBHALLOC) $(LIBCOMMON)
-FLAGS := -arch=sm_35 -O3 -Xcompiler -fopenmp 
+
+ARCH := -gencode arch=compute_20,code=sm_20 \
+	-gencode arch=compute_30,code=sm_30 \
+	-gencode arch=compute_35,code=sm_35
+
+FLAGS := $(ARCH) -O3 -Xcompiler -fopenmp
 CUFLAGS := $(FLAGS) -I../../include -I../../common 
 
 ifeq ($(WITH_SCATTER), 1)

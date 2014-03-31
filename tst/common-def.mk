@@ -1,2 +1,2 @@
 # currently, =1 is not supported
-WITH_SCATTER=1
+WITH_SCATTER=0
