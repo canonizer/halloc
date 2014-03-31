@@ -146,6 +146,8 @@ __device__ __forceinline__ uint sb_ctr_inc
 		return_mask &= ~1;
 	uint old_count = sb_count(old_counter);
 	uint threshold = ldca(&size_infos_g[size_id].busy_threshold);
+	//uint threshold = (ldca(&size_infos_g[size_id].busy_threshold) + 
+	//									ldca(&size_infos_g[size_id].nchunks)) / 2;
 	//if(old_count + change > threshold)
 	if(old_count + change >= threshold && old_count < threshold)
 		return_mask |= 2;
@@ -484,6 +486,8 @@ __device__ __forceinline__ void *sb_alloc_in
 				uint count = sb_count(*(volatile uint *)&sb_counters_g[isb]);
 				if(count >= ldca(&size_info->busy_threshold))
 					break;
+				//if(count >= (ldca(&size_info->busy_threshold) + 
+				//						 ldca(&size_info->nchunks)) / 2)
 			}
 			uint step = ((itry + 1) * STEP_FREQ * 
 									 ldca(&size_info->nchunks_in_block)) % 
