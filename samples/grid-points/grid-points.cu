@@ -63,6 +63,11 @@ __device__ void *atomicCAS(void **address, void *compare, void *val) {
 	return (void *)atomicCAS((uint64 *)address, (uint64)compare, (uint64)val);
 }  // atomicCAS
 
+/** atomicExch wrapper for void **/
+__device__ void *atomicExch(void **address, void *val) {
+	return (void *)atomicExch((uint64 *)address, (uint64)val);
+}
+
 /** a function to insert a point into a grid on device; this function can be
 		called concurrently by multiple threads */
 __device__ void insert_point
@@ -74,32 +79,15 @@ __device__ void insert_point
 	cell.x = max(min((int)floorf(p.x * ncells), ncells - 1), 0);
 	cell.y = max(min((int)floorf(p.y * ncells), ncells - 1), 0);
 	cell.z = max(min((int)floorf(p.z * ncells), ncells - 1), 0);
-	// cell.x = (int)floorf(p.x * ncells);
-	// cell.y = (int)floorf(p.y * ncells);
-	// cell.z = (int)floorf(p.z * ncells);
-	//printf("point = (%lf, %lf, %lf)\n, cell = (%d, %d, %d)", 
-	//			 (double)p.x, (double)p.y, (double)p.z, cell.x, cell.y, cell.z);
-	
+
 	// get the cell pointer
 	point_list_t * volatile *pcell = grid + (cell.x + ncells * (cell.y + ncells *
 																															cell.z));
-	//point_list_t * volatile *pcell = grid + ip % (ncells * ncells * ncells);
-	
-	//point_list_t *plist = (point_list_t *)malloc(sizeof(point_list_t));
-	plist->ip = ip;
-	plist->next = 0;
-
 	// try to take over the new start
 	// TODO: add __threadfence() somewhere
-	point_list_t *old = *pcell, *assumed;
-	do {
-		assumed = old;
-		plist->next = assumed;
-		old = (point_list_t *)atomicCAS((void **)pcell, assumed, plist);
-		//*pcell = plist;
-	} while(old != assumed);
-
-	// when the loop is over, new point is there	
+	point_list_t *old = (point_list_t *)atomicExch((void **)pcell, plist);
+	plist->ip = ip;
+	plist->next = old;
 }  // insert_point
 
 /** frees the grid cell; one cell can be simultaneously freed by one thread only
@@ -111,12 +99,9 @@ point_list_t *pre_chains) {
 	point_list_t *plist = *pcell, *pnext;
 	while(plist) {
 		pnext = plist->next;
-		//plist->next = 0;
 		if(!pre_chains) {
 			hafree(plist);
-			//delete plist;
 		}
-		//free(plist);
 		plist = pnext;
 	}
 }  // free_cell
