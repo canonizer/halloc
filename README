@@ -1,4 +1,4 @@
-Halloc GPU memory allocator, version 0.10
+Halloc GPU memory allocator, version 0.11
 
 INTRO
 
@@ -14,18 +14,13 @@ also more stable. This makes halloc suitable for use in GPGPU applications
 requiring fast dynamic memory management. Halloc is mainly designed for small
 allocation sizes, and delegates allocations larger than 3KiB to CUDA allocator.
 
-Halloc has been developed by Andrew V. Adinetz, who is employed as researcher in
-Juelich Supercomputing Centre, Forschungszentrum Juelich. This code is property
-of Forschungszentrum Juelich. Users can modify and/or distribute code free of
-charge, provided that this notice is retained. Users can also freely use and
-distribute halloc header files and compiled libraries in any software, free or
-commercial.
-
 
 REQUIREMENTS
 
-Software: CUDA 5.0 or higher (tested with 5.5)
-Hardware: Compute Capability 3.0 or higher, i.e. Kepler (tested on K20X and K40)
+Software: CUDA 5.0 or higher (tested with 6.5)
+Hardware: Compute Capability 2.0 or higher (tested on CC 3.5 devices K20X and K40).
+
+Note: libraries and tests are currently not compiled for compute_50/sm_50, i.e. Maxwell.
 
 
 COMPILING
