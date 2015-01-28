@@ -1,17 +1,17 @@
 #! /bin/bash
 
 
-#cd scaling
-#./exp-run.pl
+cd scaling
+./exp-run.pl
 #gnuplot ./exp-plot.gpl
-#cd ..
+cd ..
 
-#cd settings
-#./exp-run.pl
+cd settings
+./exp-run.pl
 #gnuplot ./exp-plot.gpl
-#cd ..
+cd ..
 
 cd speed
 ./exp-run.pl
-gnuplot ./exp-plot.gpl
+#gnuplot ./exp-plot.gpl
 cd ..

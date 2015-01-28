@@ -1,7 +1,7 @@
 #! /usr/bin/env perl
 
 
-$device = 3;
+$device = 1;
 
 # runs, sets exernal variables to data extracted from test run; 
 # negative values mean that no data has been extracted

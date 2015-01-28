@@ -18,7 +18,7 @@ TMP=*~ \\\#* src/*~ src/\\\#* tst/corr/*~ tst/corr/*.o $(TGT) $(TEST_TGT)
 # throughput); 39-42 (39 tested) are good when operating in L1-preferred mode
 build: $(TGT)
 $(TGT):	$(SRC) makefile
-	nvcc $(ARCH) -O3 -lib -rdc=true -Xptxas -dlcm=cg -Xptxas -dscm=wb \
+	nvcc $(ARCH) -lineinfo -O3 -lib -rdc=true -Xptxas -dlcm=cg -Xptxas -dscm=wb \
 	-Xptxas -maxrregcount=64 -o $(TGT) $(SRC_C)
 #	-Xptxas -maxrregcount=42 -o $(TGT) $(SRC_C)
 #	nvcc $(ARCH) -O3 -lib -rdc=true -Xptxas -dlcm=cs -Xptxas -dscm=cs -o $(TGT) $(SRC_C)

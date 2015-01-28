@@ -96,15 +96,15 @@ int parse_int(char *str, int a = INT_MIN, int b = INT_MAX) {
 	return r;
 }  // parse_int
 
-char *allocator_types[] = {
+const char *allocator_types[] = {
 	"cuda", "halloc", "scatter", "xmalloc"
 };
 
-char *distr_types[] = {
+const char *distr_types[] = {
 	"uniform", "expuniform", "expequal"
 };
 
-static uint parse_enum(char *str, char *name, char **vals, uint top) {
+static uint parse_enum(char *str, const char *name, const char **vals, uint top) {
 	int istr;
 	for(istr = 0; istr < top - 1; istr++)
 		if(!strcmp(str, vals[istr]))
