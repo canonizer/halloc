@@ -1,4 +1,4 @@
-PREFIX=~/usr
+PREFIX=$(HOME)/usr
 NAME=libhalloc.a
 HEADER=src/halloc.h
 SRC_C=src/*.cu
