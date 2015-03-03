@@ -18,10 +18,8 @@ allocation sizes, and delegates allocations larger than 3KiB to CUDA allocator.
 # Requirements #
 
 Software: CUDA 5.0 or higher (tested with 6.5)
-Hardware: Compute Capability 2.0 or higher (tested on CC 3.5 devices K20X and K40).
-
-Note: libraries and tests are currently not compiled for `compute_50`/`sm_50`,
-i.e. Maxwell.
+Hardware: Compute Capability 2.0 or higher (tested on CC 3.5 devices K20X and
+K40).
 
 
 # Compiling #

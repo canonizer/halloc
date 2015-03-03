@@ -1,3 +1,4 @@
+include ../../../common.mk
 include ../../common-def.mk
 
 LIBHALLOC=../../../bin/libhalloc.a
@@ -6,14 +7,10 @@ LIBSCATTER=../../include/libscatteralloc.a
 
 LIBS :=$(LIBHALLOC) $(LIBCOMMON)
 
-ARCH := -gencode arch=compute_20,code=sm_20 \
-	-gencode arch=compute_30,code=sm_30 \
-	-gencode arch=compute_35,code=sm_35
-
-FLAGS := $(ARCH) -O3 -Xcompiler -fopenmp
+FLAGS := $(NVCC_ARCH) -O3 -Xcompiler -fopenmp
 CUFLAGS := $(FLAGS) -I../../include -I../../common 
 
-ifeq ($(WITH_SCATTER), 1)
+ifeq ($(WITH_SCATTER), yes)
 LIBS += $(LIBSCATTER)
 CUFLAGS += -DWITH_SCATTER
 endif

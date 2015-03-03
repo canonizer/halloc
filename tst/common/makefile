@@ -1,3 +1,4 @@
+include ../../common.mk
 include ../common-def.mk
 
 TGT=libcommontest.a
@@ -6,12 +7,8 @@ SRC_H=*.h
 SRC=$(SRC_C) $(SRC_H)
 TMP=$(TGT) *~ \#*
 
-ARCH := -gencode arch=compute_20,code=sm_20 \
-	-gencode arch=compute_30,code=sm_30 \
-	-gencode arch=compute_35,code=sm_35
-
-FLAGS= $(ARCH) -O3 -rdc=true -lib -I../include
-ifeq ($(WITH_SCATTER), 1)
+FLAGS= $(NVCC_ARCH) -O3 -rdc=true -lib -I../include
+ifeq ($(WITH_SCATTER),yes)
 FLAGS += -DWITH_SCATTER
 endif
 
