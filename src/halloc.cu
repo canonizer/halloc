@@ -116,8 +116,8 @@ __device__ inline uint ichunk_init
 	ichunk = (ichunk & ~tmod_mask) * THREAD_FREQ + (ichunk & tmod_mask);
 	//ichunk = ichunk / THREAD_MOD * THREAD_MOD * THREAD_FREQ + ichunk % THREAD_MOD;
 #endif
-	ichunk = ichunk * ldca(&size_info->nchunks_in_block) %
-		ldca(&size_info->nchunks);	
+	ichunk = ichunk * ldsz(&size_info->nchunks_in_block) %
+		ldsz(&size_info->nchunks);
 	return ichunk;
 }  // ichunk_init
 
@@ -127,15 +127,15 @@ __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
 	//uint ihead = (blockIdx.x / 32) % NHEADS;
 	uint ihead = 0;
 	uint size_id = size_id_from_nbytes(nbytes);
-	size_info_t *size_info = &size_infos_g[size_id];
+	const size_info_t *size_info = info_for_size(size_id);
 	uint head_sb = *(volatile uint *)&head_sbs_g[ihead][size_id];
 
 	uint cv = size_ctr_inc(size_id);
 	void *p = 0;
 
 	uint ichunk = ichunk_init(cv, size_id, size_info);
-	//ichunk = ichunk * ldca(&size_info->nchunks_in_block) &
-	//	(ldca(&size_info->nchunks) - 1);
+	//ichunk = ichunk * ldsz(&size_info->nchunks_in_block) &
+	//	(ldsz(&size_info->nchunks) - 1);
 	// main allocation loop
 	bool want_alloc = true, need_roomy_sb = false;
 	//uint res_mask = 0xc;
@@ -162,7 +162,7 @@ __device__ __forceinline__ void *hamalloc_small(uint nbytes) {
 						//assert(!forced);
 						//if(forced)
 						//	printf("forced detaching head slab %d\n", head_sb);
-						head_sb = new_sb_for_size(size_id, ldca(&size_info->chunk_id), ihead);
+						head_sb = new_sb_for_size(size_id, ldsz(&size_info->chunk_id), ihead);
 					}
 					if(size_id == leader_size_id) {
 						head_sb = warp_bcast(head_sb, leader_lid);
@@ -391,7 +391,8 @@ void ha_init(halloc_opts_t opts) {
 		size_info->busy_threshold = opts.busy_fraction * size_info->nchunks;
 		size_info->sparse_threshold = opts.sparse_fraction * size_info->nchunks;
 	}  // for(each size)
-	cuset_arr(size_infos_g, &size_infos);
+	cuset_arr(size_infos_cg, &size_infos);
+	cuset_arr(size_infos_dg, &size_infos);
 
 	// set grid info
 	uint64 sb_grid[2 * MAX_NSBS];

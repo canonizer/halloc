@@ -145,9 +145,9 @@ __device__ __forceinline__ uint sb_ctr_inc
 	if(sb_chunk_id(old_counter) != chunk_id)
 		return_mask &= ~1;
 	uint old_count = sb_count(old_counter);
-	uint threshold = ldca(&size_infos_g[size_id].busy_threshold);
-	//uint threshold = (ldca(&size_infos_g[size_id].busy_threshold) + 
-	//									ldca(&size_infos_g[size_id].nchunks)) / 2;
+	uint threshold = szid_get(size_id, busy_threshold);
+	//uint threshold = (szid_get(size_id, busy_threshold) + 
+	//									szid_get(size_id, nchunks)) / 2;
 	//if(old_count + change > threshold)
 	if(old_count + change >= threshold && old_count < threshold)
 		return_mask |= 2;
@@ -183,11 +183,11 @@ __device__ __forceinline__ void sb_ctr_dec(uint sb_id, uint nchunks) {
 					// slab is non-head, so do manipulations
 					uint old_count = sb_count(old_counter);
 					uint new_count = old_count - change;
-					uint busy_threshold = ldca(&size_infos_g[size_id].busy_threshold);
+					uint busy_threshold = szid_get(size_id, busy_threshold);
 					if(new_count <= busy_threshold && old_count > busy_threshold) {
 						sbset_add_to(busy_sbs_g[size_id], sb_id);
 					} else {
-						uint roomy_threshold = ldca(&size_infos_g[size_id].roomy_threshold);
+						uint roomy_threshold = szid_get(size_id, roomy_threshold);
 						if(new_count <= roomy_threshold && old_count > roomy_threshold) {
 							// mark superblock as roomy for current size
 							sbset_add_to(roomy_sbs_g[size_id], sb_id);
@@ -195,7 +195,7 @@ __device__ __forceinline__ void sb_ctr_dec(uint sb_id, uint nchunks) {
 							sbset_remove_from(busy_sbs_g[size_id], sb_id);
 							sbset_add_to(roomy_sbs_g[size_id], sb_id);
 						} else {
-							uint sparse_threshold = ldca(&size_infos_g[size_id].sparse_threshold);
+							uint sparse_threshold = szid_get(size_id, sparse_threshold);
 							//uint chunk_id = sb_chunk_id(old_counter);
 							if(new_count <= sparse_threshold && 
 								 old_count > sparse_threshold)	{
@@ -232,7 +232,7 @@ __device__ __forceinline__ void detach_head(uint head) {
 	uint count = sb_count(old_counter);
 	//uint size_id = sb_size_id(old_counter);
 	uint size_id = sbs_g[head].size_id;
-	uint busy_threshold = ldca(&size_infos_g[size_id].roomy_threshold);
+	uint busy_threshold = szid_get(size_id, roomy_threshold);
 	if(count <= busy_threshold) {
 		//uint chunk_id = sb_chunk_id(old_counter);
 		uint chunk_id = sbs_g[head].chunk_id;
@@ -240,8 +240,8 @@ __device__ __forceinline__ void detach_head(uint head) {
 			sb_try_mark_free(head, size_id, chunk_id, true);
 			//sb_try_mark_free(head, size_id, chunk_id);
 		} else {
-			uint sparse_threshold = ldca(&size_infos_g[chunk_id].sparse_threshold);
-			uint roomy_threshold = ldca(&size_infos_g[chunk_id].roomy_threshold);
+			uint sparse_threshold = szid_get(chunk_id, sparse_threshold);
+			uint roomy_threshold = szid_get(chunk_id, roomy_threshold);
 			if(count <= sparse_threshold) {
 				sbset_add_to(sparse_sbs_g[chunk_id], head);
 			} else if(count <= roomy_threshold) {
@@ -269,7 +269,7 @@ __device__ __forceinline__ uint find_sb_for_size(uint size_id, uint chunk_id) {
 		bool found = false;
 		if(!sbs_g[new_head].is_head && sbs_g[new_head].size_id == size_id) {
 			if(sb_count(sb_counters_g[new_head]) <= 
-				 ldca(&size_infos_g[size_id].roomy_threshold)) {
+				 szid_get(size_id, roomy_threshold)) {
 				found = true;
 				*(volatile bool *)&sbs_g[new_head].is_head = true;
 				// ensure that the counter is updated
@@ -293,7 +293,7 @@ __device__ __forceinline__ uint find_sb_for_size(uint size_id, uint chunk_id) {
 			bool found = false;
 			if(!sbs_g[new_head].is_head && sbs_g[new_head].chunk_id == chunk_id) {
 				if(sb_count(sb_counters_g[new_head]) <= 
-					 ldca(&size_infos_g[size_id].sparse_threshold)) {
+					 szid_get(size_id, sparse_threshold)) {
 					// found
 					found = true;
 					*(volatile bool *)&sbs_g[new_head].is_head = true;
@@ -330,7 +330,7 @@ __device__ __forceinline__ uint find_sb_for_size(uint size_id, uint chunk_id) {
 				*(volatile uint *)&sbs_g[new_head].size_id = size_id;
 				*(volatile uint *)&sbs_g[new_head].chunk_id = chunk_id;
 				*(volatile uint *)&sbs_g[new_head].chunk_sz = 
-					ldca(&size_infos_g[size_id].chunk_sz);
+					szid_get(size_id, chunk_sz);
 				// ensure that the counter is updated
 				// TODO: pack both updates into one atomic
 				if(!sb_set_head(&sb_counters_g[new_head]))
@@ -348,8 +348,8 @@ __device__ __forceinline__ uint find_sb_for_size(uint size_id, uint chunk_id) {
 	if(new_head == SB_NONE) {
 		while((new_head = sbset_get_from(busy_sbs_g[size_id])) != SB_NONE) {
 			if(sb_count(sb_counters_g[new_head]) <= 
-				 (ldca(&size_infos_g[size_id].busy_threshold)  + 
-					ldca(&size_infos_g[size_id].nchunks)) / 2) {
+				 (szid_get(size_id, busy_threshold)  + 
+					szid_get(size_id, nchunks)) / 2) {
 				// try set head
 				lock(&sb_locks_g[new_head]);
 				bool found = false;
@@ -387,7 +387,7 @@ __device__ __forceinline__ uint new_sb_for_size
 		uint new_head = SB_NONE;
 		if(cur_head == SB_NONE || 
 			 sb_count(*(volatile uint *)&sb_counters_g[cur_head]) >=
-			 ldca(&size_infos_g[size_id].busy_threshold)) {
+			 szid_get(size_id, busy_threshold)) {
 			//uint64 t1 = clock64();
 			
 #if CACHE_HEAD_SBS
@@ -452,7 +452,7 @@ __device__ __forceinline__ uint new_sb_for_size
 	*/
 __device__ __forceinline__ void *sb_alloc_in
 (uint ihead, uint isb, uint ichunk0, uint &itry, uint size_id, bool &needs_new_head) {
-	const size_info_t *size_info = &size_infos_g[size_id];
+	const size_info_t *size_info = info_for_size(size_id);
 	if(isb == SB_NONE) {
 		needs_new_head = true;
 		return 0;
@@ -470,7 +470,7 @@ __device__ __forceinline__ void *sb_alloc_in
 		// try reserve
 		uint iword = ichunk / WORD_SZ;
 		uint ibit = ichunk % WORD_SZ;
-		uint alloc_mask = ((1 << ldca(&size_info->nchunks_in_block)) - 1) << ibit;
+		uint alloc_mask = ((1 << ldsz(&size_info->nchunks_in_block)) - 1) << ibit;
 		old_word = atomicOr(block_bits + iword, alloc_mask);
 		if(!(old_word & alloc_mask)) {
 			// initial reservation successful
@@ -484,16 +484,16 @@ __device__ __forceinline__ void *sb_alloc_in
 			// check the counter
 			if(itry % CHECK_NTRIES == CHECK_NTRIES - 1) {
 				uint count = sb_count(*(volatile uint *)&sb_counters_g[isb]);
-				if(count >= ldca(&size_info->busy_threshold))
+				if(count >= ldsz(&size_info->busy_threshold))
 					break;
-				//if(count >= (ldca(&size_info->busy_threshold) + 
-				//						 ldca(&size_info->nchunks)) / 2)
+				//if(count >= (ldsz(&size_info->busy_threshold) + 
+				//						 ldsz(&size_info->nchunks)) / 2)
 			}
 			uint step = ((itry + 1) * STEP_FREQ * 
-									 ldca(&size_info->nchunks_in_block)) % 
-				ldca(&size_info->hash_step);
-			ichunk = (ichunk0 + (itry + 1) * step) % ldca(&size_info->nchunks);
-			//ichunk = (ichunk0 + step) % ldca(&size_info->nchunks);
+									 ldsz(&size_info->nchunks_in_block)) % 
+				ldsz(&size_info->hash_step);
+			ichunk = (ichunk0 + (itry + 1) * step) % ldsz(&size_info->nchunks);
+			//ichunk = (ichunk0 + step) % sz_get(size_info, nchunks);
 		}
 	} while(++itry % MAX_NTRIES < MAX_NTRIES - 1);
 		//}
@@ -501,16 +501,18 @@ __device__ __forceinline__ void *sb_alloc_in
 	if(reserved) {
 		// increment counter
 		inc_mask = sb_ctr_inc
-			(size_id, ldca(&size_info->chunk_id), isb, ldca(&size_info->nchunks_in_block));
+			(size_id, ldsz(&size_info->chunk_id), isb, 
+			 ldsz(&size_info->nchunks_in_block));
 		//if(!sb_ctr_inc(size_id, isb, 1)) {
 		if(!(inc_mask & 1)) {
 			// reservation unsuccessful (slab was freed), cancel it
 			uint iword = ichunk / WORD_SZ;
 			uint ibit = ichunk % WORD_SZ;
-			uint alloc_mask = ((1 << ldca(&size_info->nchunks_in_block)) - 1) << ibit;
+			uint alloc_mask = ((1 << ldsz(&size_info->nchunks_in_block)) - 1) << 
+				ibit;
 			//atomicAnd(block_bits + iword, ~alloc_mask | old_word & alloc_mask);
 			atomicAnd(block_bits + iword, ~alloc_mask);
-			sb_ctr_dec(isb, ldca(&size_info->nchunks_in_block));
+			sb_ctr_dec(isb, ldsz(&size_info->nchunks_in_block));
 			reserved = false;
 			needs_new_head = true;
 		} else {
@@ -521,13 +523,13 @@ __device__ __forceinline__ void *sb_alloc_in
 			// appropriately aligned
 			void *sbptr = ldca(&sb_ptrs_g[isb]);
 			//void *sbptr = sbs_g[isb].ptr;
-			p = (char *)sbptr + chunk_mul(ichunk, ldca(&size_info->chunk_sz));
+			p = (char *)sbptr + chunk_mul(ichunk, ldsz(&size_info->chunk_sz));
 			// prefetch the data
 			//prefetch_l2(p);
 			// write allocation size
 			// TODO: support chunks of other size
 			uint *alloc_sizes = sb_alloc_sizes(isb);
-			sb_set_alloc_size(alloc_sizes, ichunk, ldca(&size_info->nchunks_in_block));
+			sb_set_alloc_size(alloc_sizes, ichunk, ldsz(&size_info->nchunks_in_block));
 		}
 	} else
 		needs_new_head = true;

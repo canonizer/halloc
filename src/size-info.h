@@ -3,6 +3,8 @@
 
 /** @file size-info.h information and definitions related to sizes */
 
+#include "utils.h"
+
 /** size information type; this is non-changing information, to be stored in
 		constant memory */
 typedef struct {
@@ -68,5 +70,25 @@ __host__ __device__ inline uint chunk_div(uint v, uint chunk_sz) {
 		v /= 3u;
 	return v >> (chunk_sz & 0xffffu);
 }
+
+/** loads size-related data with appropriate caching */
+__device__ __forceinline__ uint ldsz(const uint *p) {
+#if __CUDA_CC__ >= 500 
+	// on Maxwell, p points to constant memory, just use it
+	return *p;
+#else
+	// below Maxwell, use L1 caching if available
+	return ldca(p);
+#endif
+}  // ldsz
+
+/** gets the size infos as they are stored */
+__device__ __forceinline__ const size_info_t *info_for_size(uint size_id);
+
+/** easy way to get a size field */
+#define sz_get(szinfo, field) \
+	(ldsz(&szinfo->field))
+#define szid_get(size_id, field) \
+	sz_get(info_for_size(size_id), field)
 
 #endif

@@ -20,3 +20,7 @@ static __device__ superblock_t sbs_g[MAX_NSBS];
 __attribute__((aligned(128))) static __device__ void *sb_ptrs_g[MAX_NSBS];
 /** slab (non-distributed) counters */
 static __device__ uint sb_counters_g[MAX_NSBS];
+
+/** information on sizes */
+static __constant__ size_info_t size_infos_cg[MAX_NSIZES];
+__attribute__((aligned(128))) static __device__ size_info_t size_infos_dg[MAX_NSIZES];
